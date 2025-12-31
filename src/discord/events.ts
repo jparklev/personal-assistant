@@ -5,6 +5,7 @@ import type { DiscordTransport } from './transport';
 import type { AppConfig } from '../config';
 import type { StateStore } from '../state';
 import { invokeClaudeCode, buildAssistantContext } from '../assistant/invoke';
+import { getClaudeSession, type StreamUpdate } from '../assistant/session';
 import { getFileBlipStore } from '../blips/file-store';
 import type { BlipCategory } from '../blips/types';
 import { extractUrls, detectContentType, CAPTURES_DIR } from '../captures';
@@ -118,9 +119,10 @@ async function handleAssistantMessage(message: Message, ctx: AppContext): Promis
   else if (message.channelId === assistantChannels.questions) channelType = 'questions';
   else if (message.channelId === assistantChannels.blips) channelType = 'blips';
 
-  if ('sendTyping' in message.channel) {
-    await message.channel.sendTyping();
-  }
+  // Send initial progress message
+  const progressMsg = await message.reply('🧠 Thinking...');
+  let lastUpdateTime = Date.now();
+  let lastStatus = '';
 
   const prompt = `You are the personal assistant responding in the ${channelType} Discord channel.
 
@@ -144,34 +146,55 @@ If the user shares something you should remember, note it. If they correct you, 
 
 Output ONLY your response message, nothing else.`;
 
-  const result = await invokeClaudeCode({
-    prompt,
-    timeout: 90000,
-  });
+  try {
+    const session = getClaudeSession();
 
-  if (result.success && result.text) {
-    const maxLen = 1900;
-    if (result.text.length <= maxLen) {
-      await message.reply(result.text);
-    } else {
-      const chunks: string[] = [];
-      let remaining = result.text;
-      while (remaining.length > 0) {
-        if (remaining.length <= maxLen) {
-          chunks.push(remaining);
-          break;
+    const result = await session.sendWithStreaming(prompt, async (update: StreamUpdate) => {
+      // Throttle updates to avoid rate limiting (max every 2 seconds)
+      const now = Date.now();
+      if (now - lastUpdateTime < 2000 && !update.isComplete) return;
+
+      let statusLine = '';
+      if (update.type === 'thinking') {
+        statusLine = '🧠 Thinking...';
+      } else if (update.type === 'tool') {
+        statusLine = `⚙️ ${update.content.slice(0, 80)}`;
+      } else if (update.type === 'response' && !update.isComplete) {
+        statusLine = '📝 Writing...';
+      }
+
+      // Only update if status changed
+      if (statusLine && statusLine !== lastStatus) {
+        lastStatus = statusLine;
+        lastUpdateTime = now;
+        try {
+          await progressMsg.edit(statusLine);
+        } catch {
+          // Message may have been deleted
         }
-        let cut = remaining.lastIndexOf('\n', maxLen);
-        if (cut < maxLen * 0.5) cut = maxLen;
-        chunks.push(remaining.slice(0, cut));
-        remaining = remaining.slice(cut).replace(/^\n/, '');
       }
-      for (const chunk of chunks) {
-        await message.reply(chunk);
+    });
+
+    // Final response
+    if (result.text) {
+      const maxLen = 1900;
+      const responseText = result.text.slice(0, maxLen);
+      await progressMsg.edit(responseText);
+
+      // If response is longer, send additional messages
+      if (result.text.length > maxLen) {
+        let remaining = result.text.slice(maxLen);
+        while (remaining.length > 0) {
+          const chunk = remaining.slice(0, maxLen);
+          await message.reply(chunk);
+          remaining = remaining.slice(maxLen);
+        }
       }
+    } else {
+      await progressMsg.edit('I had trouble processing that. Please try again.');
     }
-  } else {
-    await message.reply(`I had trouble processing that. ${result.error || 'Please try again.'}`);
+  } catch (error: any) {
+    await progressMsg.edit(`I had trouble processing that. ${error?.message || 'Please try again.'}`);
   }
 }
 
@@ -188,101 +211,15 @@ async function handleCaptureMessage(message: Message, ctx: AppContext): Promise<
     return;
   }
 
-  if ('sendTyping' in message.channel) {
-    await message.channel.sendTyping();
-  }
-
   for (const url of urls) {
     const contentType = detectContentType(url);
 
-    let extractionInstructions = '';
+    // Send initial progress message
+    const progressMsg = await message.reply(`⏳ Capturing ${contentType}...`);
+    let lastUpdateTime = Date.now();
+    let lastStatus = '';
 
-    if (contentType === 'youtube') {
-      extractionInstructions = `## YouTube Video Extraction
-
-This is a YouTube video.
-
-### Step 1: Try yt-dlp for subtitles first (fastest)
-\`\`\`bash
-cd /tmp && yt-dlp --write-auto-sub --skip-download --sub-lang en -o "yt_capture" "${url}" 2>&1
-\`\`\`
-
-If subtitles exist, read and clean the VTT file:
-- File at /tmp/yt_capture.en.vtt
-- Remove timestamps and formatting tags, keep just the text
-- Remove duplicate lines
-
-### Step 2: If no subtitles, transcribe with mlx-whisper
-\`\`\`bash
-yt-dlp -x --audio-format mp3 -o "/tmp/yt_capture.%(ext)s" "${url}"
-mlx_whisper /tmp/yt_capture.mp3 --model mlx-community/whisper-turbo -f txt -o /tmp
-cat /tmp/yt_capture.txt
-rm /tmp/yt_capture.mp3
-\`\`\`
-
-### Step 3: Get video metadata
-\`\`\`bash
-yt-dlp --dump-json --skip-download "${url}" 2>/dev/null | head -c 5000
-\`\`\`
-
-### Step 4: Clean up all temp files
-\`\`\`bash
-rm -f /tmp/yt_capture.*
-\`\`\`
-
-Extract: title, channel name, description, duration, and full transcript.`;
-
-    } else if (contentType === 'podcast') {
-      const isPocketCasts = url.includes('pocketcasts.com') || url.includes('pca.st');
-
-      extractionInstructions = `## Podcast Extraction
-
-This is a podcast episode.
-
-### Step 1: Fetch Page Metadata
-Fetch the page with WebFetch to get episode metadata.
-${isPocketCasts ? '- Note: pca.st links redirect to pocketcasts.com - follow the redirect' : ''}
-
-### Step 2: Extract Episode Info
-Look for and capture:
-- Episode title
-- Show/podcast name
-- Episode description/show notes
-- Guest names if mentioned
-- Duration
-- Release date
-- Links mentioned in show notes
-
-### Step 3: Transcribe with mlx-whisper
-\`\`\`bash
-curl -L -o /tmp/podcast_capture.mp3 "AUDIO_URL"
-mlx_whisper /tmp/podcast_capture.mp3 --model mlx-community/whisper-turbo -f txt -o /tmp
-cat /tmp/podcast_capture.txt
-rm /tmp/podcast_capture.mp3
-\`\`\``;
-
-    } else if (contentType === 'pdf') {
-      extractionInstructions = `## PDF Extraction
-
-This is a PDF file. To extract:
-
-1. Download the PDF:
-   \`\`\`bash
-   curl -L -o /tmp/capture.pdf "${url}"
-   \`\`\`
-
-2. Try to extract text:
-   \`\`\`bash
-   pdftotext /tmp/capture.pdf /tmp/capture.txt 2>/dev/null && cat /tmp/capture.txt
-   \`\`\`
-
-3. Clean up temp files when done.`;
-
-    } else {
-      extractionInstructions = `## Article/Webpage Extraction
-
-This is a webpage. Use WebFetch to get the page content and extract the main article text.`;
-    }
+    const extractionInstructions = getExtractionInstructions(url, contentType);
 
     const prompt = `You are the personal assistant. Capture and save content from this URL.
 
@@ -319,17 +256,139 @@ Use this format:
 
 After saving, respond with a brief confirmation including the filename and a 1-line summary.`;
 
-    const result = await invokeClaudeCode({
-      prompt,
-      timeout: 120000,
-    });
+    try {
+      const session = getClaudeSession();
 
-    if (result.success && result.text) {
-      await message.reply(result.text.slice(0, 1900));
-    } else {
-      await message.reply(`Failed to capture ${url}: ${result.error || 'Unknown error'}`);
+      const result = await session.sendWithStreaming(prompt, async (update: StreamUpdate) => {
+        // Throttle updates to avoid rate limiting (max every 2 seconds)
+        const now = Date.now();
+        if (now - lastUpdateTime < 2000 && !update.isComplete) return;
+
+        let statusLine = '';
+        if (update.type === 'thinking') {
+          statusLine = `🧠 Thinking...`;
+        } else if (update.type === 'tool') {
+          statusLine = `⚙️ ${update.content.slice(0, 100)}`;
+        } else if (update.type === 'response' && !update.isComplete) {
+          statusLine = `📝 Writing response...`;
+        }
+
+        // Only update if status changed
+        if (statusLine && statusLine !== lastStatus) {
+          lastStatus = statusLine;
+          lastUpdateTime = now;
+          try {
+            await progressMsg.edit(`⏳ Capturing ${contentType}...\n${statusLine}`);
+          } catch {
+            // Message may have been deleted
+          }
+        }
+      });
+
+      // Final response
+      if (result.text) {
+        const toolsSummary = result.toolCalls.length > 0
+          ? `\n\n_Tools: ${result.toolCalls.join(', ')} | ${(result.durationMs / 1000).toFixed(1)}s_`
+          : `\n\n_${(result.durationMs / 1000).toFixed(1)}s_`;
+
+        const finalText = result.text.slice(0, 1800) + toolsSummary;
+        await progressMsg.edit(finalText);
+      } else {
+        await progressMsg.edit(`❌ Failed to capture ${url}: No response`);
+      }
+    } catch (error: any) {
+      await progressMsg.edit(`❌ Failed to capture ${url}: ${error?.message || 'Unknown error'}`);
     }
   }
+}
+
+function getExtractionInstructions(url: string, contentType: string): string {
+  if (contentType === 'youtube') {
+    return `## YouTube Video Extraction
+
+This is a YouTube video.
+
+### Step 1: Try yt-dlp for subtitles first (fastest)
+\`\`\`bash
+cd /tmp && yt-dlp --write-auto-sub --skip-download --sub-lang en -o "yt_capture" "${url}" 2>&1
+\`\`\`
+
+If subtitles exist, read and clean the VTT file:
+- File at /tmp/yt_capture.en.vtt
+- Remove timestamps and formatting tags, keep just the text
+- Remove duplicate lines
+
+### Step 2: If no subtitles, transcribe with mlx-whisper
+\`\`\`bash
+yt-dlp -x --audio-format mp3 -o "/tmp/yt_capture.%(ext)s" "${url}"
+mlx_whisper /tmp/yt_capture.mp3 --model mlx-community/whisper-turbo -f txt -o /tmp
+cat /tmp/yt_capture.txt
+rm /tmp/yt_capture.mp3
+\`\`\`
+
+### Step 3: Get video metadata
+\`\`\`bash
+yt-dlp --dump-json --skip-download "${url}" 2>/dev/null | head -c 5000
+\`\`\`
+
+### Step 4: Clean up all temp files
+\`\`\`bash
+rm -f /tmp/yt_capture.*
+\`\`\`
+
+Extract: title, channel name, description, duration, and full transcript.`;
+  }
+
+  if (contentType === 'podcast') {
+    const isPocketCasts = url.includes('pocketcasts.com') || url.includes('pca.st');
+    return `## Podcast Extraction
+
+This is a podcast episode.
+
+### Step 1: Fetch Page Metadata
+Fetch the page with WebFetch to get episode metadata.
+${isPocketCasts ? '- Note: pca.st links redirect to pocketcasts.com - follow the redirect' : ''}
+
+### Step 2: Extract Episode Info
+Look for and capture:
+- Episode title
+- Show/podcast name
+- Episode description/show notes
+- Guest names if mentioned
+- Duration
+- Release date
+- Links mentioned in show notes
+
+### Step 3: Transcribe with mlx-whisper
+\`\`\`bash
+curl -L -o /tmp/podcast_capture.mp3 "AUDIO_URL"
+mlx_whisper /tmp/podcast_capture.mp3 --model mlx-community/whisper-turbo -f txt -o /tmp
+cat /tmp/podcast_capture.txt
+rm /tmp/podcast_capture.mp3
+\`\`\``;
+  }
+
+  if (contentType === 'pdf') {
+    return `## PDF Extraction
+
+This is a PDF file. To extract:
+
+1. Download the PDF:
+   \`\`\`bash
+   curl -L -o /tmp/capture.pdf "${url}"
+   \`\`\`
+
+2. Try to extract text:
+   \`\`\`bash
+   pdftotext /tmp/capture.pdf /tmp/capture.txt 2>/dev/null && cat /tmp/capture.txt
+   \`\`\`
+
+3. Clean up temp files when done.`;
+  }
+
+  return `## Article/Webpage Extraction
+
+This is a webpage. Use WebFetch to get the page content and extract the main article text.`;
 }
 
 // ============== Blip Handlers ==============
