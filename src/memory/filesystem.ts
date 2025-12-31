@@ -495,6 +495,45 @@ Record of corrections to avoid repeating mistakes.
 `, 'utf-8');
   }
 
+  // Create memory.md if not exists (used by invoke.ts for context)
+  const memoryPath = join(ASSISTANT_DIR, 'memory.md');
+  if (!existsSync(memoryPath)) {
+    writeFileSync(memoryPath, `---
+updated: ${new Date().toISOString().split('T')[0]}
+last_vault_commit: null
+---
+
+## Pointers
+
+Obsidian vault: \`/Users/joshlevine/Library/Mobile Documents/iCloud~md~Obsidian/Documents/Personal\`
+
+- Goals: \`2026 Goals.md\`
+- Daily notes: \`Daily/YYYY-MM-DD.md\`
+- Inbox: \`Note Inbox.md\`
+- Clippings: \`Clippings/\`
+
+## Preferences
+
+- Communication style: direct, no fluff
+- Encourage thinking, don't just give answers
+- Call out gaps, ask follow-ups (accountable partner)
+
+## Remembered
+
+<!-- Facts the user asked to remember -->
+<!-- Format: - Fact [date: YYYY-MM-DD] for date-relevant items -->
+
+## Patterns
+
+<!-- Observations about recurring themes -->
+
+## Corrections
+
+<!-- Log corrections as they happen -->
+<!-- Format: - YYYY-MM-DD: "Original" → "What I should have done" -->
+`, 'utf-8');
+  }
+
   // Create claude.md if not exists
   const claudePath = join(ASSISTANT_DIR, 'claude.md');
   if (!existsSync(claudePath)) {

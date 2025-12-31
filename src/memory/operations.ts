@@ -188,13 +188,13 @@ export function getAllQuestions(): StandingQuestion[] {
 
 const DEFAULT_MORNING_CHECKIN: MorningCheckinState = {
   lastRun: null,
-  lastMessageId: null,
+  lastChannelId: null,
 };
 
 export function updateMorningCheckin(channelId: string): void {
   writeState('morning-checkin', {
     lastRun: new Date().toISOString(),
-    lastMessageId: channelId,
+    lastChannelId: channelId,
   });
 }
 

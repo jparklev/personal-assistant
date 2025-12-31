@@ -113,7 +113,7 @@ export interface VaultSyncState {
 
 export interface MorningCheckinState {
   lastRun: string | null;
-  lastMessageId: string | null;
+  lastChannelId: string | null;
 }
 
 // ============== Clipper State (state/clipper-processing.json) ==============

@@ -13,7 +13,7 @@
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/joshlevine/src/tries/2025-12-25-agent-orchestrator</string>
+    <string>/Users/joshlevine/src/tries/2025-12-25-agent-orchestrator/personal-assistant</string>
 
     <key>StartCalendarInterval</key>
     <dict>

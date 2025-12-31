@@ -2,7 +2,7 @@ import { Client, GatewayIntentBits, TextChannel } from 'discord.js';
 import type { SchedulerContext, TaskResult } from '../types';
 import { getFileBlipStore } from '../../blips/file-store';
 import { getDueQuestions, markQuestionAsked, updateMorningCheckin } from '../../memory';
-import { invokeClaudeCode, buildAssistantContext, checkpointVaultCommit, VAULT_PATH } from '../../assistant/invoke';
+import { invokeClaudeCode, buildAssistantContext, checkpointVaultCommit } from '../../assistant/invoke';
 import { getTodayReminders } from '../../integrations/reminders';
 import { VaultWatcher } from '../../vault/watcher';
 
@@ -18,7 +18,7 @@ export async function runMorningCheckin(ctx: SchedulerContext): Promise<TaskResu
   const reminders = getTodayReminders();
 
   // Check for vault changes
-  const watcher = new VaultWatcher(VAULT_PATH);
+  const watcher = new VaultWatcher(ctx.vaultPath);
   const vaultChanges = watcher.getChangesToday();
 
   const today = new Date();
@@ -162,19 +162,24 @@ async function sendMessage(
 }
 
 // For testing - generate without sending
-export async function generateMorningCheckinContent(): Promise<{
+export async function generateMorningCheckinContent(vaultPath?: string): Promise<{
   message: string;
   blipsToSurface: { id: string; content: string; reason: string }[];
   remindersCount: number;
   vaultChangesCount: number;
   dueQuestion?: { id: string; question: string };
 }> {
+  const { homedir } = require('os');
+  const { join } = require('path');
+  const defaultVaultPath = process.env.OBSIDIAN_VAULT_PATH?.trim() ||
+    join(homedir(), 'Library/Mobile Documents/iCloud~md~Obsidian/Documents/Personal');
+
   const blipStore = getFileBlipStore();
   const blipsToSurface = blipStore.getSurfaceableBlips(3);
   const dueQuestions = getDueQuestions();
   const reminders = getTodayReminders();
 
-  const watcher = new VaultWatcher(VAULT_PATH);
+  const watcher = new VaultWatcher(vaultPath || defaultVaultPath);
   const vaultChanges = watcher.getChangesToday();
 
   const today = new Date();

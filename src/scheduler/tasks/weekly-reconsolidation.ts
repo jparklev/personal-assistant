@@ -15,7 +15,7 @@ import { homedir } from 'os';
 import type { SchedulerContext, TaskResult } from '../types';
 import { getFileBlipStore } from '../../blips/file-store';
 import { getRecentCaptures, formatCapturesForContext } from '../../captures';
-import { invokeClaudeCode, buildAssistantContext, VAULT_PATH } from '../../assistant/invoke';
+import { invokeClaudeCode, buildAssistantContext } from '../../assistant/invoke';
 
 const ASSISTANT_DIR = join(homedir(), '.assistant');
 const RECONSOLIDATION_STATE = join(ASSISTANT_DIR, 'state', 'reconsolidation.json');

@@ -101,8 +101,9 @@ export async function invokeClaudeCode(opts: InvokeOptions): Promise<InvokeResul
   });
 }
 
-// Vault path - the user's Obsidian vault
-export const VAULT_PATH = '/Users/joshlevine/Library/Mobile Documents/iCloud~md~Obsidian/Documents/Personal';
+// Vault path - configurable via OBSIDIAN_VAULT_PATH env var
+export const VAULT_PATH = process.env.OBSIDIAN_VAULT_PATH?.trim() ||
+  join(homedir(), 'Library/Mobile Documents/iCloud~md~Obsidian/Documents/Personal');
 
 /**
  * Build context from ~/.assistant/ for injection into prompts.

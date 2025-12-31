@@ -43,7 +43,7 @@ function loadEnv() {
 
 // Load state to get channel IDs
 function loadChannels(): SchedulerContext['channels'] {
-  const statePath = join(process.cwd(), 'state/agents.json');
+  const statePath = join(process.cwd(), 'state/assistant.json');
   if (!existsSync(statePath)) {
     return {};
   }
