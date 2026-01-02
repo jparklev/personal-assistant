@@ -35,6 +35,7 @@ type StreamState = {
   messageId?: string;
   currentFilename?: string;
   view?: 'normal' | 'related' | 'prompt';
+  busy?: { kind: 'ai_related' | 'prompt' | 'ai_move'; at: string };
   prompt?: {
     questions: string[];
   };
@@ -129,6 +130,7 @@ function renderBlipCard(opts: {
   view?: StreamState['view'];
   prompt?: StreamState['prompt'];
   relatedAi?: StreamState['relatedAi'];
+  busy?: StreamState['busy'];
   mode?: 'active' | 'done';
 }): {
   flags: number;
@@ -159,6 +161,15 @@ function renderBlipCard(opts: {
   const moveLine = moves.length > 0 ? `Suggested: ${moves.slice(0, 3).map((m) => m.label).join(' · ')}` : '';
 
   const mode = opts.mode || 'active';
+  const busy = opts.busy;
+  const busyLine =
+    mode === 'active' && busy
+      ? busy.kind === 'ai_related'
+        ? '_Working: finding AI-related blips…_'
+        : busy.kind === 'prompt'
+          ? '_Working: generating prompts…_'
+          : '_Working: picking an AI move…_'
+      : '';
   const meta = [
     `**${title}**`,
     [statusLine, touched ? `touched ${touched}` : '', created ? `created ${created}` : ''].filter(Boolean).join(' · '),
@@ -166,6 +177,7 @@ function renderBlipCard(opts: {
     source,
     capture,
     moveLine || 'Do move: ask AI to pick one helpful move, log it, advance.',
+    busyLine,
   ]
     .filter(Boolean)
     .join('\n');
@@ -330,7 +342,13 @@ export async function ensureBlipsStreamCard(opts: {
   const filename = slot.currentFilename || getNextBlipFilename() || null;
   if (!filename) return;
 
-  const payload = renderBlipCard({ filename, view: slot.view, prompt: slot.prompt, relatedAi: slot.relatedAi });
+  const payload = renderBlipCard({
+    filename,
+    view: slot.view,
+    prompt: slot.prompt,
+    relatedAi: slot.relatedAi,
+    busy: slot.busy,
+  });
   slot.currentFilename = filename;
 
   if (slot.messageId) {
@@ -364,6 +382,14 @@ export function isBlipsStreamCustomId(customId: string): boolean {
   return customId.startsWith(BLIPS_STREAM_CUSTOM_ID_PREFIX) || customId.startsWith(BLIPS_STREAM_MODAL_PREFIX);
 }
 
+async function maybeSendTyping(interaction: ButtonInteraction): Promise<void> {
+  const ch: any = interaction.channel as any;
+  if (!ch) return;
+  const fn = ch.sendTyping;
+  if (typeof fn !== 'function') return;
+  await fn.call(ch).catch(() => {});
+}
+
 async function refreshInPlace(message: Message, filename: string | null): Promise<void> {
   if (!filename) {
     await message.edit({
@@ -381,7 +407,9 @@ async function refreshInPlace(message: Message, filename: string | null): Promis
   }
   const state = readStreamState();
   const slot = state[message.channelId] || {};
-  await message.edit(renderBlipCard({ filename, view: slot.view, prompt: slot.prompt, relatedAi: slot.relatedAi }) as any);
+  await message.edit(
+    renderBlipCard({ filename, view: slot.view, prompt: slot.prompt, relatedAi: slot.relatedAi, busy: slot.busy }) as any
+  );
 }
 
 async function sendNewCard(message: Message, filename: string | null): Promise<Message | null> {
@@ -389,7 +417,9 @@ async function sendNewCard(message: Message, filename: string | null): Promise<M
   const state = readStreamState();
   const slot = state[message.channelId] || {};
   const ch = message.channel as TextChannel;
-  const sent = await ch.send(renderBlipCard({ filename, view: slot.view, prompt: slot.prompt, relatedAi: slot.relatedAi }) as any).catch(() => null);
+  const sent = await ch
+    .send(renderBlipCard({ filename, view: slot.view, prompt: slot.prompt, relatedAi: slot.relatedAi, busy: slot.busy }) as any)
+    .catch(() => null);
   return sent as any;
 }
 
@@ -398,6 +428,7 @@ async function advanceCard(message: Message, currentFilename?: string): Promise<
   const state = readStreamState();
   const slot = (state[message.channelId] ||= {});
   slot.view = 'normal';
+  delete slot.busy;
   delete slot.prompt;
   delete slot.relatedAi;
   writeStreamState(state);
@@ -419,6 +450,7 @@ async function advanceCardFallback(client: Client, guild: Guild | null, channelI
   const state = readStreamState();
   const slot = (state[channelId] ||= {});
   slot.view = 'normal';
+  delete slot.busy;
   delete slot.prompt;
   slot.currentFilename = next || undefined;
   writeStreamState(state);
@@ -560,9 +592,11 @@ export async function handleBlipsStreamButton(interaction: ButtonInteraction): P
     const state2 = readStreamState();
     const slot2 = (state2[interaction.channelId] ||= {});
     slot2.view = 'related';
+    slot2.busy = { kind: 'ai_related', at: new Date().toISOString() };
     slot2.relatedAi = { forFilename: filename, status: 'loading', items: [], at: new Date().toISOString() };
     writeStreamState(state2);
     await refreshInPlace(message, filename);
+    await maybeSendTyping(interaction);
 
     try {
       const cfg = loadConfig();
@@ -595,6 +629,7 @@ export async function handleBlipsStreamButton(interaction: ButtonInteraction): P
       const state3 = readStreamState();
       const slot3 = (state3[interaction.channelId] ||= {});
       slot3.view = 'related';
+      delete slot3.busy;
       slot3.relatedAi = { forFilename: filename, status: 'done', items, at: new Date().toISOString() };
       writeStreamState(state3);
       await refreshInPlace(message, filename);
@@ -603,6 +638,7 @@ export async function handleBlipsStreamButton(interaction: ButtonInteraction): P
       const state3 = readStreamState();
       const slot3 = (state3[interaction.channelId] ||= {});
       slot3.view = 'related';
+      delete slot3.busy;
       slot3.relatedAi = {
         forFilename: filename,
         status: 'error',
@@ -623,6 +659,13 @@ export async function handleBlipsStreamButton(interaction: ButtonInteraction): P
       return;
     }
 
+    const state0 = readStreamState();
+    const slot0 = (state0[interaction.channelId] ||= {});
+    slot0.busy = { kind: 'prompt', at: new Date().toISOString() };
+    writeStreamState(state0);
+    await refreshInPlace(message, filename);
+    await maybeSendTyping(interaction);
+
     const prompt = `You are helping a personal blips system.\n\nHere is a blip:\n\nTitle: ${blip.title}\nStatus: ${blip.status}\nContent:\n${blip.content.slice(0, 2500)}\n\nWrite 1-3 short, concrete questions that would help the user update this blip (progress, changes, direction, next step). If no questions are helpful, output an empty list.\n\nOutput ONLY JSON: {\"questions\": [\"...\"]}\n`;
     const res = await invokeClaude(prompt, { model: 'haiku' });
     let qs: string[] = [];
@@ -636,6 +679,7 @@ export async function handleBlipsStreamButton(interaction: ButtonInteraction): P
     const state2 = readStreamState();
     const slot2 = (state2[interaction.channelId] ||= {});
     slot2.view = 'prompt';
+    delete slot2.busy;
     delete slot2.relatedAi;
     slot2.prompt = { questions: qs.length > 0 ? qs : ['What’s changed since you captured this?', 'Any new examples, constraints, or direction?', 'What would be a tiny next step?'] };
     writeStreamState(state2);
@@ -672,6 +716,13 @@ export async function handleBlipsStreamButton(interaction: ButtonInteraction): P
       await advanceCard(message, filename);
       return;
     }
+
+    const state0 = readStreamState();
+    const slot0 = (state0[interaction.channelId] ||= {});
+    slot0.busy = { kind: 'ai_move', at: new Date().toISOString() };
+    writeStreamState(state0);
+    await refreshInPlace(message, filename);
+    await maybeSendTyping(interaction);
 
     const suggestions = suggestMoves(blip).map((m) => ({ move: m.move, label: m.label, description: m.description }));
 
