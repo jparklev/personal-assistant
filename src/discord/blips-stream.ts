@@ -26,7 +26,6 @@ import {
   suggestMoves,
   findRelated,
 } from '../blips';
-import { parseFrontmatter, serializeFrontmatter } from '../utils/frontmatter';
 
 const BLIPS_STREAM_CUSTOM_ID_PREFIX = 'blips_stream:';
 const BLIPS_STREAM_MODAL_PREFIX = 'blips_stream_modal:';
@@ -35,7 +34,7 @@ type StreamState = {
   messageId?: string;
   currentFilename?: string;
   view?: 'normal' | 'related' | 'prompt';
-  busy?: { kind: 'ai_related' | 'prompt' | 'ai_move'; at: string };
+  busy?: { kind: 'ai_related' | 'prompt'; at: string };
   prompt?: {
     questions: string[];
   };
@@ -89,40 +88,19 @@ function getNextBlipFilename(excludeFilename?: string): string | null {
 }
 
 function excerptBlipContent(raw: string, maxLen: number): string {
-  const content = raw.split('\n## Log')[0] || raw;
+  const content = raw.split(/\n##\s+Log\b/)[0] || raw;
   const trimmed = content.trim();
   if (!trimmed) return '';
   if (trimmed.length <= maxLen) return trimmed;
   return trimmed.slice(0, maxLen - 1) + '…';
 }
 
-function insertMarkdownIntoBlip(path: string, md: string): void {
-  const raw = readFileSync(path, 'utf-8');
-  const { frontmatter, content } = parseFrontmatter<any>(raw);
-  const insert = md.trim();
-  if (!insert) return;
-
-  const notesMarker = '## Notes';
-  const logMarker = '## Log';
-  const notesIndex = content.indexOf(notesMarker);
-  const logIndex = content.indexOf(logMarker);
-
-  let nextContent = content.trimEnd();
-
-  // Prefer to place inside Notes when it exists and insert doesn't look like a top-level section.
-  const looksLikeTopSection = /^##\s+/m.test(insert);
-  if (notesIndex !== -1 && !looksLikeTopSection) {
-    const afterNotes = content.slice(notesIndex + notesMarker.length);
-    const beforeNotes = content.slice(0, notesIndex + notesMarker.length);
-    nextContent = (beforeNotes + `\n\n${insert}\n` + afterNotes).trimEnd();
-  } else if (logIndex !== -1) {
-    // Otherwise place before Log so Log remains last-ish.
-    nextContent = (content.slice(0, logIndex).trimEnd() + `\n\n${insert}\n\n` + content.slice(logIndex)).trimEnd();
-  } else {
-    nextContent = (content.trimEnd() + `\n\n${insert}\n`).trimEnd();
-  }
-
-  writeFileSync(path, serializeFrontmatter(frontmatter, nextContent), 'utf-8');
+function excerptCaptureText(raw: string, maxLen: number): string {
+  const m = raw.match(/##\s+Extracted Text\s*\n([\s\S]*?)(?:\n##\s+Raw HTML\b|$)/i);
+  const content = (m?.[1] || raw).trim();
+  if (!content) return '';
+  if (content.length <= maxLen) return content;
+  return content.slice(0, maxLen - 1) + '…';
 }
 
 function renderBlipCard(opts: {
@@ -168,7 +146,7 @@ function renderBlipCard(opts: {
         ? '_Working: finding AI-related blips…_'
         : busy.kind === 'prompt'
           ? '_Working: generating prompts…_'
-          : '_Working: picking an AI move…_'
+          : ''
       : '';
   const meta = [
     `**${title}**`,
@@ -176,13 +154,14 @@ function renderBlipCard(opts: {
     tags ? `Tags: ${tags}` : '',
     source,
     capture,
-    moveLine || 'Do move: ask AI to pick one helpful move, log it, advance.',
+    moveLine,
     busyLine,
   ]
     .filter(Boolean)
     .join('\n');
 
   let excerpt = blip ? excerptBlipContent(blip.content, 450) : '';
+  if (!excerpt && capture) excerpt = '_No notes yet. Use **Capture** to view the captured text._';
   const view = opts.view || 'normal';
   if (view === 'related' && blip) {
     const relatedAi = opts.relatedAi && opts.relatedAi.forFilename === filename ? opts.relatedAi : null;
@@ -226,7 +205,7 @@ function renderBlipCard(opts: {
   const sep: any = { type: ComponentType.Separator };
   const body: any = {
     type: ComponentType.TextDisplay,
-    content: excerpt ? excerpt : '_No content found for this blip._',
+    content: excerpt ? excerpt : '_No notes yet._',
   };
 
   const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -239,12 +218,12 @@ function renderBlipCard(opts: {
       .setLabel('Thoughts')
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
-      .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}do:${filename}`)
-      .setLabel('AI move')
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
       .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}prompt:${filename}`)
       .setLabel('Prompt')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}details:${filename}`)
+      .setLabel('Details')
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}archive:${filename}`)
@@ -275,8 +254,8 @@ function renderBlipCard(opts: {
           .setLabel('AI related')
           .setStyle(ButtonStyle.Secondary)
       : new ButtonBuilder()
-          .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}bump:${filename}`)
-          .setLabel('Bump')
+          .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}capture:${filename}`)
+          .setLabel('Capture')
           .setStyle(ButtonStyle.Secondary),
   ];
 
@@ -292,6 +271,13 @@ function renderBlipCard(opts: {
       new ButtonBuilder()
         .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}skip:${filename}`)
         .setLabel('Skip')
+        .setStyle(ButtonStyle.Secondary)
+    );
+  } else {
+    row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}bump:${filename}`)
+        .setLabel('Bump')
         .setStyle(ButtonStyle.Secondary)
     );
   }
@@ -553,9 +539,65 @@ export async function handleBlipsStreamButton(interaction: ButtonInteraction): P
     return;
   }
 
-  await interaction.deferUpdate().catch(() => {});
-
   const path = blipPathFromFilename(filename);
+  if (verb === 'details') {
+    const blip = readBlip(path);
+    if (!blip) {
+      await interaction.reply({ content: 'Blip not found on disk.', ephemeral: true }).catch(() => {});
+      return;
+    }
+
+    const captureName = (blip.frontmatter as any)?.capture;
+    const capturePath = typeof captureName === 'string' && captureName ? `~/.assistant/captures/${captureName}` : '(none)';
+    const content = excerptBlipContent(blip.content, 1800) || '(no notes yet)';
+    const text = [
+      `**${blip.title}**`,
+      `Status: ${blip.status}`,
+      blip.touched ? `Touched: ${blip.touched}` : '',
+      blip.created ? `Created: ${blip.created}` : '',
+      blip.source ? `Source: ${blip.source}` : '',
+      `Capture: ${capturePath}`,
+      '',
+      content,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    await interaction.reply({ content: text.slice(0, 2000), ephemeral: true }).catch(() => {});
+    return;
+  }
+
+  if (verb === 'capture') {
+    const blip = readBlip(path);
+    const captureName = (blip?.frontmatter as any)?.capture;
+    if (!captureName || typeof captureName !== 'string') {
+      await interaction.reply({ content: 'No capture file is linked for this blip.', ephemeral: true }).catch(() => {});
+      return;
+    }
+
+    const cfg = loadConfig();
+    const capturePath = join(cfg.assistantDir, 'captures', captureName);
+    if (!existsSync(capturePath)) {
+      await interaction.reply({
+        content: `Capture file not found at \`~/.assistant/captures/${captureName}\`.`,
+        ephemeral: true,
+      }).catch(() => {});
+      return;
+    }
+
+    const raw = readFileSync(capturePath, 'utf-8');
+    const excerpt = excerptCaptureText(raw, 1800) || '(empty capture)';
+    const text = [`**Capture excerpt**`, `Full capture: \`~/.assistant/captures/${captureName}\``, '', excerpt].join('\n');
+    await interaction.reply({ content: text.slice(0, 2000), ephemeral: true }).catch(() => {});
+    return;
+  }
+
+  if (verb === 'do') {
+    await interaction.reply({ content: 'AI move is disabled.', ephemeral: true }).catch(() => {});
+    return;
+  }
+
+  await interaction.deferUpdate().catch(() => {});
   if (verb === 'archive') {
     archiveBlip(path);
     await advanceCard(message, filename);
@@ -710,45 +752,7 @@ export async function handleBlipsStreamButton(interaction: ButtonInteraction): P
     return;
   }
 
-  if (verb === 'do') {
-    const blip = readBlip(path);
-    if (!blip) {
-      await advanceCard(message, filename);
-      return;
-    }
-
-    const state0 = readStreamState();
-    const slot0 = (state0[interaction.channelId] ||= {});
-    slot0.busy = { kind: 'ai_move', at: new Date().toISOString() };
-    writeStreamState(state0);
-    await refreshInPlace(message, filename);
-    await maybeSendTyping(interaction);
-
-    const suggestions = suggestMoves(blip).map((m) => ({ move: m.move, label: m.label, description: m.description }));
-
-    const prompt = `You are an assistant helping evolve a personal blip.\n\nBlip title: ${blip.title}\nBlip status: ${blip.status}\nBlip content:\n${blip.content.slice(0, 3000)}\n\nCandidate moves:\n${suggestions.map((s) => `- ${s.move}: ${s.label} (${s.description})`).join('\n')}\n\nPick ONE move that is likely to be helpful *now*.\nThen produce a tiny update for the blip:\n- logLine: a short log entry describing what happened\n- section: optional markdown section to append (can be empty)\n- questions: optional 0-2 questions for the user to consider later (empty if not needed)\n\nOutput ONLY JSON with keys: {\"move\":\"...\",\"logLine\":\"...\",\"section\":\"...\",\"questions\":[\"...\"]}\n`;
-
-    const res = await invokeClaude(prompt, { model: 'haiku' });
-    let out: any = null;
-    try {
-      out = JSON.parse((res.text || '').trim());
-    } catch {
-      out = null;
-    }
-
-    const logLine = typeof out?.logLine === 'string' && out.logLine.trim() ? out.logLine.trim() : 'Did a suggested move.';
-    const section = typeof out?.section === 'string' ? out.section.trim() : '';
-    const qs = Array.isArray(out?.questions) ? out.questions.filter((q: any) => typeof q === 'string' && q.trim()).slice(0, 2) : [];
-
-    if (section) insertMarkdownIntoBlip(path, section);
-    appendToLog(path, `Move: ${typeof out?.move === 'string' ? out.move : 'unknown'} — ${logLine}`);
-    if (qs.length > 0) {
-      appendToLog(path, `Questions:\n${qs.map((q: string) => `- ${q}`).join('\n')}`);
-    }
-
-    await advanceCard(message, filename);
-    return;
-  }
+  // verb === 'do' is handled above (disabled).
 }
 
 export async function handleBlipsStreamModal(interaction: ModalSubmitInteraction): Promise<void> {
