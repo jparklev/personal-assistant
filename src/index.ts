@@ -1,10 +1,12 @@
+import { Events } from 'discord.js';
 import { loadConfig } from './config';
 import { defaultState, StateStore } from './state';
 import { logJson } from './log';
-import { createDiscordClient, createReacord } from './discord/client';
+import { createDiscordClient } from './discord/client';
 import { createDiscordTransport } from './discord/transport';
 import { registerEventHandlers } from './discord/events';
 import { ensureMemoryDirs, initializeMemoryFiles } from './memory';
+import { ensureCapturesDir } from './captures';
 
 async function main() {
   const cfg = loadConfig();
@@ -23,16 +25,16 @@ async function main() {
   // Initialize memory directories and files
   ensureMemoryDirs();
   initializeMemoryFiles();
+  ensureCapturesDir();
 
   const store = new StateStore(cfg.stateFile, defaultState());
 
   const client = createDiscordClient();
-  const reacord = createReacord(client);
-  const transport = createDiscordTransport(client, reacord);
+  const transport = createDiscordTransport(client);
 
   registerEventHandlers(client, { cfg, state: store, transport });
 
-  client.once('ready', async (c) => {
+  client.once(Events.ClientReady, async (c) => {
     console.log(`\nDiscord bot ready as ${c.user.tag}`);
     console.log(`  Guilds: ${c.guilds.cache.size}`);
     console.log('\nListening for commands...');

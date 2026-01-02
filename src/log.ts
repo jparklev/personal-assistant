@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
 
-const LOG_FILE = 'logs/telegram.log';
+const LOG_FILE = 'logs/discord.log';
 
 // Token patterns to redact from logs (telegram bot tokens, API keys, etc.)
 const TELEGRAM_TOKEN_RE = /bot\d+:[A-Za-z0-9_-]+/gi;

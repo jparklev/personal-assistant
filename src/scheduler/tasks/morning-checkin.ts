@@ -1,6 +1,6 @@
 import { Client, GatewayIntentBits, TextChannel } from 'discord.js';
 import type { SchedulerContext, TaskResult } from '../types';
-import { getFileBlipStore } from '../../blips/file-store';
+import { getBlipsToSurface, readBlip, touchBlip, type BlipSummary } from '../../blips';
 import { getDueQuestions, markQuestionAsked, updateMorningCheckin } from '../../memory';
 import { invokeClaudeCode, buildAssistantContext, checkpointVaultCommit } from '../../assistant/invoke';
 import { getTodayReminders } from '../../integrations/reminders';
@@ -12,8 +12,11 @@ export async function runMorningCheckin(ctx: SchedulerContext): Promise<TaskResu
   }
 
   // Gather context from all sources
-  const blipStore = getFileBlipStore();
-  const blipsToSurface = blipStore.getSurfaceableBlips(3);
+  const blipSummaries = getBlipsToSurface(3);
+  const blipsToSurface = blipSummaries.map((summary) => {
+    const blip = readBlip(summary.path);
+    return { summary, blip, reason: `Not touched since ${summary.touched}` };
+  }).filter((b) => b.blip !== null);
   const dueQuestions = getDueQuestions();
   const reminders = getTodayReminders();
 
@@ -48,12 +51,12 @@ ${buildAssistantContext()}
     : '(none)'}
 
 3. **Vault changes today**: ${vaultChanges.length > 0
-    ? vaultChanges.slice(0, 5).map(c => c.path).join(', ') + (vaultChanges.length > 5 ? '...' : '')
+    ? vaultChanges.slice(0, 5).map((c) => c.path).join(', ') + (vaultChanges.length > 5 ? '...' : '')
     : '(none)'}
 
 4. **Blips to surface**:
 ${blipsToSurface.length > 0
-  ? blipsToSurface.map((r) => `   - [${r.blip.id}] ${r.blip.content.slice(0, 100)}... (${r.reason})`).join('\n')
+  ? blipsToSurface.map((r) => `   - ${r.blip!.title}: ${r.blip!.content.slice(0, 100)}... (${r.reason})`).join('\n')
   : '   (none ready)'}
 
 5. **Standing question**: ${dueQuestions[0]?.question || '(none due today)'}
@@ -95,7 +98,7 @@ Output ONLY the message to send, nothing else.`;
 }
 
 interface MorningContext {
-  blipsToSurface: { blip: { id: string } }[];
+  blipsToSurface: { summary: BlipSummary }[];
   dueQuestions: { id: string }[];
   remindersCount: number;
   vaultChangesCount: number;
@@ -128,9 +131,8 @@ async function sendMessage(
 
     await channel.send(message);
 
-    // Mark blips as surfaced
-    const blipStore = getFileBlipStore();
-    morning.blipsToSurface.forEach((r) => blipStore.markSurfaced(r.blip.id));
+    // Mark blips as surfaced (touch them)
+    morning.blipsToSurface.forEach((r) => touchBlip(r.summary.path));
 
     // Mark question as asked
     if (morning.dueQuestions[0]) {
@@ -164,7 +166,7 @@ async function sendMessage(
 // For testing - generate without sending
 export async function generateMorningCheckinContent(vaultPath?: string): Promise<{
   message: string;
-  blipsToSurface: { id: string; content: string; reason: string }[];
+  blipsToSurface: { title: string; content: string; reason: string }[];
   remindersCount: number;
   vaultChangesCount: number;
   dueQuestion?: { id: string; question: string };
@@ -174,8 +176,11 @@ export async function generateMorningCheckinContent(vaultPath?: string): Promise
   const defaultVaultPath = process.env.OBSIDIAN_VAULT_PATH?.trim() ||
     join(homedir(), 'Library/Mobile Documents/iCloud~md~Obsidian/Documents/Personal');
 
-  const blipStore = getFileBlipStore();
-  const blipsToSurface = blipStore.getSurfaceableBlips(3);
+  const blipSummaries = getBlipsToSurface(3);
+  const blipsToSurface = blipSummaries.map((summary) => {
+    const blip = readBlip(summary.path);
+    return { summary, blip, reason: `Not touched since ${summary.touched}` };
+  }).filter((b) => b.blip !== null);
   const dueQuestions = getDueQuestions();
   const reminders = getTodayReminders();
 
@@ -208,12 +213,12 @@ ${buildAssistantContext()}
     : '(none)'}
 
 3. **Vault changes today**: ${vaultChanges.length > 0
-    ? vaultChanges.slice(0, 5).map(c => c.path).join(', ')
+    ? vaultChanges.slice(0, 5).map((c) => c.path).join(', ')
     : '(none)'}
 
 4. **Blips to surface**:
 ${blipsToSurface.length > 0
-  ? blipsToSurface.map((r) => `   - [${r.blip.id}] ${r.blip.content.slice(0, 100)}... (${r.reason})`).join('\n')
+  ? blipsToSurface.map((r) => `   - ${r.blip!.title}: ${r.blip!.content.slice(0, 100)}... (${r.reason})`).join('\n')
   : '   (none ready)'}
 
 5. **Standing question**: ${dueQuestions[0]?.question || '(none due today)'}
@@ -242,8 +247,8 @@ Output ONLY the message, nothing else.`;
   return {
     message,
     blipsToSurface: blipsToSurface.map((r) => ({
-      id: r.blip.id,
-      content: r.blip.content,
+      title: r.blip!.title,
+      content: r.blip!.content,
       reason: r.reason,
     })),
     remindersCount: reminders.length,

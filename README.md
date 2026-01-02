@@ -18,6 +18,8 @@ bun run deploy:commands
 bun run start
 ```
 
+Operational notes: `docs/RUNBOOK.md`.
+
 ## Data Storage
 
 Everything lives in `~/.assistant/`:
@@ -42,7 +44,7 @@ Everything lives in `~/.assistant/`:
 - `/blip snooze <id>` - Hide for a while
 - `/blip archive <id>` - Archive a blip
 
-**Captures** (post a URL in the captures channel)
+**Captures** (post a URL in the blips channel)
 - YouTube videos - extracts transcript via yt-dlp or mlx-whisper
 - Podcasts - transcribes audio with mlx-whisper
 - Articles - extracts main content
@@ -50,9 +52,14 @@ Everything lives in `~/.assistant/`:
 
 **Settings**
 - `/assistant enable` - Turn assistant on/off
-- `/assistant channel <type> <channel>` - Set channel for morning/questions/blips/captures
+- `/assistant channel <type> <channel>` - Set channels for morning/blips/lobby
+- `/assistant category <category>` - Set the category for assistant-created channels
 - `/assistant status` - Show configuration
 - `/assistant sync` - Sync vault changes
+
+**Blips Stream** (one blip at a time, with buttons)
+- Create a channel named `blips-stream` (or set it explicitly via `/assistant channel type: Blips Stream`)
+- The bot keeps a single “current blip” card updated (Components V2) with buttons like Next/Thoughts/Prompt/Do move/Snooze/Related/Bump/Archive
 
 ## Scheduled Tasks
 

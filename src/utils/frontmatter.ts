@@ -52,23 +52,75 @@ export function serializeFrontmatter<T = Record<string, unknown>>(
 }
 
 /**
- * Parse simple YAML (handles: strings, numbers, booleans, arrays, dates)
+ * Parse simple YAML (handles: strings, numbers, booleans, arrays including block lists)
  */
 function parseYaml(yaml: string): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   const lines = yaml.split('\n');
 
-  for (const line of lines) {
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    // Skip empty lines and comments
+    if (!trimmed || trimmed.startsWith('#')) {
+      i++;
+      continue;
+    }
+
+    // Skip list items at top level (they belong to previous key)
+    if (trimmed.startsWith('- ')) {
+      i++;
+      continue;
+    }
 
     const colonIndex = trimmed.indexOf(':');
-    if (colonIndex === -1) continue;
+    if (colonIndex === -1) {
+      i++;
+      continue;
+    }
 
     const key = trimmed.slice(0, colonIndex).trim();
     let value: unknown = trimmed.slice(colonIndex + 1).trim();
 
-    // Parse value
+    // Check for block list (empty value followed by indented - items)
+    if (value === '' || value === null) {
+      const blockItems: string[] = [];
+      let j = i + 1;
+
+      while (j < lines.length) {
+        const nextLine = lines[j];
+        const nextTrimmed = nextLine.trim();
+
+        // Check if this is an indented list item
+        if (nextTrimmed.startsWith('- ')) {
+          let item = nextTrimmed.slice(2).trim();
+          // Remove quotes if present
+          if ((item.startsWith('"') && item.endsWith('"')) || (item.startsWith("'") && item.endsWith("'"))) {
+            item = item.slice(1, -1);
+          }
+          blockItems.push(item);
+          j++;
+        } else if (nextTrimmed === '' || nextLine.startsWith('  ') || nextLine.startsWith('\t')) {
+          // Continuation of block or empty line in block
+          j++;
+        } else {
+          // New key, exit block
+          break;
+        }
+      }
+
+      if (blockItems.length > 0) {
+        // Dedupe items
+        value = [...new Set(blockItems)];
+        i = j;
+        result[key] = value;
+        continue;
+      }
+    }
+
+    // Parse inline value
     if (value === '' || value === 'null' || value === '~') {
       value = null;
     } else if (value === 'true') {
@@ -99,6 +151,7 @@ function parseYaml(yaml: string): Record<string, unknown> {
     }
 
     result[key] = value;
+    i++;
   }
 
   return result;

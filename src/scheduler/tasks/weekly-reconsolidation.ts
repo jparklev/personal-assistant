@@ -13,7 +13,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { SchedulerContext, TaskResult } from '../types';
-import { getFileBlipStore } from '../../blips/file-store';
+import { listBlips, readBlip, archiveBlip, type BlipSummary } from '../../blips';
 import { getRecentCaptures, formatCapturesForContext } from '../../captures';
 import { invokeClaudeCode, buildAssistantContext } from '../../assistant/invoke';
 
@@ -45,26 +45,25 @@ function updateReconsolidationState(updates: Partial<ReconsolidationState>): voi
 
 export async function runWeeklyReconsolidation(ctx: SchedulerContext): Promise<TaskResult> {
   // Can use any channel that's configured
-  const targetChannel = ctx.channels.morningCheckin || ctx.channels.questions || ctx.channels.blips;
+  const targetChannel = ctx.channels.morningCheckin || ctx.channels.blips;
 
   if (!targetChannel) {
     return { success: false, message: 'No assistant channel configured for reconsolidation report' };
   }
 
-  const blipStore = getFileBlipStore();
-  const blipsIndex = blipStore.buildIndex();
+  const blips = listBlips();
   const recentCaptures = getRecentCaptures(7);
   const state = getReconsolidationState();
 
   const now = new Date();
   const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-  // Find stale blips (>30 days old, never surfaced or low engagement)
-  const staleBlips = blipsIndex.filter((b) => {
-    if (b.state === 'archived' || b.state === 'promoted') return false;
-    const captured = new Date(b.captured);
-    const daysSinceCapture = (now.getTime() - captured.getTime()) / (1000 * 60 * 60 * 24);
-    return daysSinceCapture > 30;
+  // Find stale blips (>30 days old)
+  const staleBlips = blips.filter((b: BlipSummary) => {
+    if (b.status === 'archived' || b.status === 'bumped') return false;
+    const created = new Date(b.created);
+    const daysSinceCreated = (now.getTime() - created.getTime()) / (1000 * 60 * 60 * 24);
+    return daysSinceCreated > 30;
   });
 
   // Build prompt for Claude Code to do the analysis
@@ -82,7 +81,7 @@ ${recentCaptures.length > 0
 ## Stale Blips (${staleBlips.length} older than 30 days)
 
 ${staleBlips.length > 0
-  ? staleBlips.map((b) => `- [${b.id}] ${b.state}: ${b.summary}`).join('\n')
+  ? staleBlips.map((b: BlipSummary) => `- ${b.filename} (${b.status}): ${b.title}`).join('\n')
   : '(no stale blips)'}
 
 ## Your Tasks
@@ -156,9 +155,16 @@ Be thoughtful but concise. This is about consolidation, not exhaustive analysis.
 
   // Archive stale blips
   const archived: string[] = [];
-  for (const id of analysis.blipsToArchive || []) {
-    if (blipStore.archive(id)) {
-      archived.push(id);
+  for (const filename of analysis.blipsToArchive || []) {
+    // Find the blip by filename
+    const blip = blips.find((b: BlipSummary) => b.filename.includes(filename) || b.title.toLowerCase().includes(filename.toLowerCase()));
+    if (blip) {
+      try {
+        archiveBlip(blip.path);
+        archived.push(filename);
+      } catch {
+        // Skip if archive fails
+      }
     }
   }
 
@@ -252,24 +258,23 @@ async function sendMessage(
 
 // For testing - generate without sending
 export async function generateReconsolidationContent(): Promise<{
-  blipsIndex: { id: string; state: string; summary: string }[];
+  blipsIndex: { filename: string; status: string; title: string }[];
   recentCaptures: { title: string; type: string }[];
   staleBlipCount: number;
 }> {
-  const blipStore = getFileBlipStore();
-  const blipsIndex = blipStore.buildIndex();
+  const blips = listBlips();
   const recentCaptures = getRecentCaptures(7);
 
   const now = new Date();
-  const staleBlips = blipsIndex.filter((b) => {
-    if (b.state === 'archived' || b.state === 'promoted') return false;
-    const captured = new Date(b.captured);
-    const daysSinceCapture = (now.getTime() - captured.getTime()) / (1000 * 60 * 60 * 24);
-    return daysSinceCapture > 30;
+  const staleBlips = blips.filter((b: BlipSummary) => {
+    if (b.status === 'archived' || b.status === 'bumped') return false;
+    const created = new Date(b.created);
+    const daysSinceCreated = (now.getTime() - created.getTime()) / (1000 * 60 * 60 * 24);
+    return daysSinceCreated > 30;
   });
 
   return {
-    blipsIndex: blipsIndex.map((b) => ({ id: b.id, state: b.state, summary: b.summary })),
+    blipsIndex: blips.map((b: BlipSummary) => ({ filename: b.filename, status: b.status, title: b.title })),
     recentCaptures: recentCaptures.map((c) => ({ title: c.title, type: c.type })),
     staleBlipCount: staleBlips.length,
   };

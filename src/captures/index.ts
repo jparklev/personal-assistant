@@ -28,6 +28,7 @@ export interface CaptureMetadata {
   capturedAt: string;
   tags?: string[];
   description?: string;
+  author?: string;
 }
 
 export interface CaptureResult {
@@ -101,6 +102,10 @@ export function generateFrontmatter(meta: CaptureMetadata): string {
     `captured: ${meta.capturedAt}`,
   ];
 
+  if (meta.author) {
+    lines.push(`author: "${meta.author.replace(/"/g, '\\"').slice(0, 200)}"`);
+  }
+
   if (meta.tags && meta.tags.length > 0) {
     lines.push(`tags: [${meta.tags.map((t) => `"${t}"`).join(', ')}]`);
   }
@@ -168,6 +173,7 @@ export interface CaptureIndexEntry {
   captured: string;
   tags?: string[];
   description?: string;
+  author?: string;
 }
 
 /**
@@ -190,6 +196,7 @@ export function buildCapturesIndex(): CaptureIndexEntry[] {
         captured?: string;
         tags?: string[];
         description?: string;
+        author?: string;
       }>(raw);
 
       entries.push({
@@ -200,6 +207,7 @@ export function buildCapturesIndex(): CaptureIndexEntry[] {
         captured: frontmatter.captured || '',
         tags: frontmatter.tags,
         description: frontmatter.description,
+        author: frontmatter.author,
       });
     } catch {
       // Skip malformed files

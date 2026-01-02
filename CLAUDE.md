@@ -77,11 +77,19 @@ As you work, update your memory:
 
 ## Blips
 
-Blips are small noticings and ideas captured for later development. They live in:
-- `~/.assistant/blips/` (one file per blip, YAML frontmatter + markdown)
-- Can be captured from Discord, Obsidian inbox, or conversation
+Blips are small noticings and ideas captured for later development. They live in the **Obsidian vault**:
+- Location: `~/Library/Mobile Documents/iCloud~md~obsidian/Documents/Personal/Blips/`
+- Format: `YYYY-MM-DD-slug.md` with YAML frontmatter
+- Statuses: `active`, `snoozed`, `archived`, `bumped`
 
-When surfacing blips:
+**Workflow:**
+- `Clippings/` folder is the inbox (web clipper saves here)
+- `processClippings()` converts clippings → blips in `Blips/`
+- Archive by changing `status: archived` in frontmatter (not moving files)
+
+When working with blips:
+- Use the blip functions in `src/blips/files.ts` (listBlips, archiveBlip, etc.)
+- **To create a blip:** You MUST use the `Write` tool to create a new markdown file in `Blips/`.
 - Ask questions to help develop them
 - Look for connections between blips
 - Help evolve them into actionable items or archive them
@@ -98,8 +106,9 @@ When surfacing blips:
 
 When operating in Discord:
 - `#morning-checkin` - daily digest and reflection
-- `#questions` - standing prompts and follow-ups
 - `#blips` - capture and surface blips
+- `#assistant` - lobby + general assistant chat + channel creation control plane
+- Any channel under the “Personal Assistant” category is treated as an assistant channel (plus any managed channels created from the lobby).
 
 ## This Codebase
 

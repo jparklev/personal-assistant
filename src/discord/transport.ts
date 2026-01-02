@@ -9,8 +9,6 @@ import type {
   Guild,
 } from 'discord.js';
 import { ChannelType, PermissionFlagsBits } from 'discord.js';
-import type { ReacordDiscordJs } from 'reacord';
-import type { ReactNode } from 'react';
 
 const FORUM_CHANNEL_NAME = 'agent-threads';
 
@@ -57,7 +55,6 @@ export interface DiscordTransport {
     content: string | { embeds?: any[]; content?: string }
   ) => Promise<void>;
 
-  reacord: ReacordDiscordJs;
   client: Client;
 }
 
@@ -124,7 +121,7 @@ function chunkText(text: string, max: number): string[] {
   return chunks;
 }
 
-export function createDiscordTransport(client: Client, reacord: ReacordDiscordJs): DiscordTransport {
+export function createDiscordTransport(client: Client): DiscordTransport {
   async function getTextChannel(channelId: string): Promise<TextChannel | ThreadChannel> {
     const channel = await client.channels.fetch(channelId);
     if (!channel) throw new Error(`Channel ${channelId} not found`);
@@ -232,7 +229,6 @@ export function createDiscordTransport(client: Client, reacord: ReacordDiscordJs
       }
     },
 
-    reacord,
     client,
   };
 }

@@ -3,11 +3,13 @@ import { dirname } from 'path';
 
 export interface AssistantStateConfig {
   enabled: boolean;
+  categoryId?: string;
+  managedChannelIds?: string[];
   channels: {
     morningCheckin?: string;
-    questions?: string;
-    blips?: string;
-    captures?: string;
+    blips?: string; // Unified channel for blips + captures
+    blipsStream?: string;
+    lobby?: string;
   };
 }
 
@@ -38,6 +40,7 @@ export function defaultState(): AppState {
     config: {},
     assistant: {
       enabled: true,
+      managedChannelIds: [],
       channels: {},
     },
   };
@@ -66,7 +69,10 @@ export class StateStore {
   }
 
   // Assistant channel management
-  setAssistantChannel(type: 'morningCheckin' | 'questions' | 'blips' | 'captures', channelId: string | undefined): void {
+  setAssistantChannel(
+    type: 'morningCheckin' | 'blips' | 'blipsStream' | 'lobby',
+    channelId: string | undefined
+  ): void {
     if (!channelId) {
       delete this.state.assistant.channels[type];
     } else {
@@ -74,8 +80,28 @@ export class StateStore {
     }
   }
 
-  getAssistantChannel(type: 'morningCheckin' | 'questions' | 'blips' | 'captures'): string | undefined {
+  getAssistantChannel(type: 'morningCheckin' | 'blips' | 'blipsStream' | 'lobby'): string | undefined {
     return this.state.assistant.channels[type];
+  }
+
+  setAssistantCategory(categoryId: string | undefined): void {
+    if (!categoryId) {
+      delete this.state.assistant.categoryId;
+    } else {
+      this.state.assistant.categoryId = categoryId;
+    }
+  }
+
+  addManagedChannel(channelId: string): void {
+    const list = (this.state.assistant.managedChannelIds ||= []);
+    if (!list.includes(channelId)) list.push(channelId);
+  }
+
+  removeManagedChannel(channelId: string): void {
+    const list = this.state.assistant.managedChannelIds;
+    if (!list) return;
+    const next = list.filter((id) => id !== channelId);
+    this.state.assistant.managedChannelIds = next;
   }
 
   setAssistantEnabled(enabled: boolean): void {
@@ -93,13 +119,25 @@ export class StateStore {
       const parsed = JSON.parse(raw) as any;
 
       const assistantConfig = parsed?.assistant ?? { enabled: true, channels: {} };
+      const managedChannelIds = Array.isArray(assistantConfig.managedChannelIds)
+        ? assistantConfig.managedChannelIds.filter((id: any) => typeof id === 'string')
+        : [];
+
+      const rawChannels = assistantConfig.channels ?? {};
+      const channels: AssistantStateConfig['channels'] = {};
+      if (typeof rawChannels.morningCheckin === 'string') channels.morningCheckin = rawChannels.morningCheckin;
+      if (typeof rawChannels.blips === 'string') channels.blips = rawChannels.blips;
+      if (typeof rawChannels.blipsStream === 'string') channels.blipsStream = rawChannels.blipsStream;
+      if (typeof rawChannels.lobby === 'string') channels.lobby = rawChannels.lobby;
 
       return {
         version: 1,
         config: parsed?.config ?? {},
         assistant: {
           enabled: assistantConfig.enabled !== false,
-          channels: assistantConfig.channels ?? {},
+          categoryId: typeof assistantConfig.categoryId === 'string' ? assistantConfig.categoryId : undefined,
+          managedChannelIds,
+          channels,
         },
       };
     } catch {

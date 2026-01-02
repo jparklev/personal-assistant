@@ -1,5 +1,4 @@
 import { Client, GatewayIntentBits, Partials } from 'discord.js';
-import { ReacordDiscordJs } from 'reacord';
 
 export function createDiscordClient(): Client {
   return new Client({
@@ -11,8 +10,4 @@ export function createDiscordClient(): Client {
     ],
     partials: [Partials.Channel, Partials.Message, Partials.ThreadMember],
   });
-}
-
-export function createReacord(client: Client): ReacordDiscordJs {
-  return new ReacordDiscordJs(client);
 }

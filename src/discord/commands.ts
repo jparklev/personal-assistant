@@ -1,4 +1,5 @@
 import { SlashCommandBuilder } from 'discord.js';
+import { ChannelType } from 'discord.js';
 
 export const commands = [
   // Blips - Personal Assistant
@@ -10,23 +11,14 @@ export const commands = [
         .setName('capture')
         .setDescription('Capture a new blip')
         .addStringOption((opt) => opt.setName('content').setDescription('The blip content').setRequired(true))
-        .addStringOption((opt) =>
-          opt
-            .setName('category')
-            .setDescription('Category')
-            .setChoices(
-              { name: 'idea', value: 'idea' },
-              { name: 'question', value: 'question' },
-              { name: 'goal', value: 'goal' },
-              { name: 'todo', value: 'todo' },
-              { name: 'quote', value: 'quote' },
-              { name: 'reference', value: 'reference' },
-              { name: 'curiosity', value: 'curiosity' },
-              { name: 'other', value: 'other' }
-            )
-        )
     )
     .addSubcommand((sub) => sub.setName('list').setDescription('List recent blips'))
+    .addSubcommand((sub) =>
+      sub
+        .setName('show')
+        .setDescription('Show full details of a blip')
+        .addStringOption((opt) => opt.setName('id').setDescription('Blip ID').setRequired(true))
+    )
     .addSubcommand((sub) =>
       sub
         .setName('surface')
@@ -77,12 +69,24 @@ export const commands = [
             .setRequired(true)
             .setChoices(
               { name: 'Morning Check-in', value: 'morningCheckin' },
-              { name: 'Questions', value: 'questions' },
               { name: 'Blips', value: 'blips' },
-              { name: 'Captures', value: 'captures' }
+              { name: 'Blips Stream', value: 'blipsStream' },
+              { name: 'Lobby', value: 'lobby' }
             )
         )
         .addChannelOption((opt) => opt.setName('channel').setDescription('Channel to use').setRequired(true))
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('category')
+        .setDescription('Set the category for assistant-created channels')
+        .addChannelOption((opt) =>
+          opt
+            .setName('category')
+            .setDescription('Category to create new channels under')
+            .setRequired(true)
+            .addChannelTypes(ChannelType.GuildCategory)
+        )
     )
     .addSubcommand((sub) => sub.setName('status').setDescription('Show assistant status and configuration'))
     .addSubcommand((sub) => sub.setName('sync').setDescription('Sync with Obsidian vault')),
