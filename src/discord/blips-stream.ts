@@ -87,6 +87,12 @@ function getNextBlipFilename(excludeFilename?: string): string | null {
   return null;
 }
 
+function blipExists(filename: string): boolean {
+  const cfg = loadConfig();
+  const path = join(cfg.blipsDir, filename);
+  return existsSync(path);
+}
+
 function excerptBlipContent(raw: string, maxLen: number): string {
   const content = raw.split(/\n##\s+Log\b/)[0] || raw;
   const trimmed = content.trim();
@@ -333,7 +339,8 @@ export async function ensureBlipsStreamCard(opts: {
   const state = readStreamState();
   const slot = (state[channel.id] ||= {});
 
-  const filename = slot.currentFilename || getNextBlipFilename() || null;
+  const wanted = slot.currentFilename && blipExists(slot.currentFilename) ? slot.currentFilename : null;
+  const filename = wanted || getNextBlipFilename() || null;
   if (!filename) return;
 
   const payload = renderBlipCard({
@@ -549,6 +556,11 @@ export async function handleBlipsStreamButton(interaction: ButtonInteraction): P
 
   const path = blipPathFromFilename(filename);
   if (verb === 'details') {
+    if (!blipExists(filename)) {
+      await interaction.reply({ content: 'That blip file no longer exists; advancing.', ephemeral: true }).catch(() => {});
+      await advanceCard(message, filename);
+      return;
+    }
     const blip = readBlip(path);
     if (!blip) {
       await interaction.reply({ content: 'Blip not found on disk.', ephemeral: true }).catch(() => {});
@@ -576,6 +588,11 @@ export async function handleBlipsStreamButton(interaction: ButtonInteraction): P
   }
 
   if (verb === 'capture') {
+    if (!blipExists(filename)) {
+      await interaction.reply({ content: 'That blip file no longer exists; advancing.', ephemeral: true }).catch(() => {});
+      await advanceCard(message, filename);
+      return;
+    }
     const blip = readBlip(path);
     const captureName = (blip?.frontmatter as any)?.capture;
     if (!captureName || typeof captureName !== 'string') {
