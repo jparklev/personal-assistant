@@ -161,6 +161,14 @@ function renderBlipCard(opts: {
     .join('\n');
 
   let excerpt = blip ? excerptBlipContent(blip.content, 450) : '';
+  if (!excerpt && typeof captureName === 'string' && captureName) {
+    const capturePath = join(cfg.assistantDir, 'captures', captureName);
+    if (existsSync(capturePath)) {
+      const raw = readFileSync(capturePath, 'utf-8');
+      const snippet = excerptCaptureText(raw, 220);
+      if (snippet) excerpt = `_${snippet}_\n\n(Use **Capture** to view more.)`;
+    }
+  }
   if (!excerpt && capture) excerpt = '_No notes yet. Use **Capture** to view the captured text._';
   const view = opts.view || 'normal';
   if (view === 'related' && blip) {
