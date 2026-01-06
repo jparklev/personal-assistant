@@ -1599,7 +1599,7 @@ async function appendMeditationEntry(content: string, message: Message, ctx: App
 
   // Get today's date in YYYY-MM-DD format
   const today = new Date().toISOString().split('T')[0];
-  const dailyNotePath = join(vaultPath, 'daily', `${today}.md`);
+  const dailyNotePath = join(vaultPath, 'Daily', `${today}.md`);
 
   // Format the entry with timestamp (Pacific time)
   const now = new Date();
@@ -1614,23 +1614,32 @@ async function appendMeditationEntry(content: string, message: Message, ctx: App
     appendFileSync(dailyNotePath, entry, 'utf-8');
 
     // Git: pull, commit, and push the change
+    // If pull fails, still commit locally but skip push (vault-sync timer will handle it)
+    let pullOk = true;
     try {
-      // Pull first to handle remote being ahead
       execSync(`git pull --rebase`, {
         cwd: vaultPath,
         timeout: 30000,
         stdio: 'pipe',
       });
     } catch (pullErr: any) {
+      pullOk = false;
       console.error('[MeditationLog] Git pull failed:', pullErr.message);
     }
 
     try {
-      execSync(`git add -A && git commit -m "meditation log: ${today}" && git push`, {
+      // Always commit locally so the change is captured
+      const commitCmd = pullOk
+        ? `git add -A && git commit -m "meditation log: ${today}" && git push`
+        : `git add -A && git commit -m "meditation log: ${today}"`;  // Skip push if pull failed
+      execSync(commitCmd, {
         cwd: vaultPath,
         timeout: 30000,
         stdio: 'pipe',
       });
+      if (!pullOk) {
+        console.log('[MeditationLog] Committed locally; skipped push (pull failed). vault-sync will handle it.');
+      }
     } catch (gitErr: any) {
       // Commit might fail if nothing to commit (already committed) - that's ok
       if (!gitErr.message?.includes('nothing to commit')) {
@@ -1641,7 +1650,7 @@ async function appendMeditationEntry(content: string, message: Message, ctx: App
     // React with thumbs up and reply with word count
     const wordCount = content.split(/\s+/).filter(Boolean).length;
     await message.react('👍');
-    await message.reply(`Logged ${wordCount} words to \`daily/${today}.md\``);
+    await message.reply(`Logged ${wordCount} words to \`Daily/${today}.md\``);
   } catch (err: any) {
     console.error('[MeditationLog] Failed to append:', err);
     await message.reply(`Failed to log meditation: ${err.message}`);
@@ -1682,7 +1691,7 @@ async function appendDailyEntry(content: string, message: Message, ctx: AppConte
 
   // Get today's date in YYYY-MM-DD format
   const today = new Date().toISOString().split('T')[0];
-  const dailyNotePath = join(vaultPath, 'daily', `${today}.md`);
+  const dailyNotePath = join(vaultPath, 'Daily', `${today}.md`);
 
   // Format the entry with timestamp (Pacific time)
   const now = new Date();
@@ -1697,23 +1706,32 @@ async function appendDailyEntry(content: string, message: Message, ctx: AppConte
     appendFileSync(dailyNotePath, entry, 'utf-8');
 
     // Git: pull, commit, and push the change
+    // If pull fails, still commit locally but skip push (vault-sync timer will handle it)
+    let pullOk = true;
     try {
-      // Pull first to handle remote being ahead
       execSync(`git pull --rebase`, {
         cwd: vaultPath,
         timeout: 30000,
         stdio: 'pipe',
       });
     } catch (pullErr: any) {
+      pullOk = false;
       console.error('[DailyLog] Git pull failed:', pullErr.message);
     }
 
     try {
-      execSync(`git add -A && git commit -m "daily log: ${today}" && git push`, {
+      // Always commit locally so the change is captured
+      const commitCmd = pullOk
+        ? `git add -A && git commit -m "daily log: ${today}" && git push`
+        : `git add -A && git commit -m "daily log: ${today}"`;  // Skip push if pull failed
+      execSync(commitCmd, {
         cwd: vaultPath,
         timeout: 30000,
         stdio: 'pipe',
       });
+      if (!pullOk) {
+        console.log('[DailyLog] Committed locally; skipped push (pull failed). vault-sync will handle it.');
+      }
     } catch (gitErr: any) {
       // Commit might fail if nothing to commit (already committed) - that's ok
       if (!gitErr.message?.includes('nothing to commit')) {
@@ -1724,7 +1742,7 @@ async function appendDailyEntry(content: string, message: Message, ctx: AppConte
     // React with thumbs up and reply with word count
     const wordCount = content.split(/\s+/).filter(Boolean).length;
     await message.react('👍');
-    await message.reply(`Logged ${wordCount} words to \`daily/${today}.md\``);
+    await message.reply(`Logged ${wordCount} words to \`Daily/${today}.md\``);
   } catch (err: any) {
     console.error('[DailyLog] Failed to append:', err);
     await message.reply(`Failed to log daily: ${err.message}`);
