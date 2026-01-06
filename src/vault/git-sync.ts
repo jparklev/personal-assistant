@@ -128,7 +128,7 @@ Task:
  * Sync vault changes to git with conflict resolution.
  *
  * Flow:
- * 1. Stage and commit local changes
+ * 1. Stage and commit local changes FIRST (so pull doesn't fail with "local changes would be overwritten")
  * 2. Pull with merge (not rebase) to get remote changes
  * 3. If conflicts, invoke Claude to resolve
  * 4. Push to remote
@@ -141,7 +141,8 @@ export async function syncVaultChanges(
 ): Promise<SyncResult> {
   const tag = '[GitSync]';
 
-  // 1. Stage local changes
+  // 1. Stage and commit local changes FIRST
+  // This is critical: git pull will fail with "local changes would be overwritten" if we don't commit first
   const addResult = git('add -A', vaultPath);
   if (!addResult.ok) {
     console.error(`${tag} git add failed:`, addResult.output);
@@ -151,6 +152,16 @@ export async function syncVaultChanges(
   // Check if there's anything to commit
   const statusResult = git('diff --cached --quiet', vaultPath);
   const hasChanges = !statusResult.ok; // exit code 1 means there are changes
+
+  // Commit local changes before pulling
+  if (hasChanges) {
+    const commitResult = git(`commit -m "${commitMessage}"`, vaultPath);
+    if (!commitResult.ok && !commitResult.output.includes('nothing to commit')) {
+      console.error(`${tag} Initial commit failed:`, commitResult.output);
+      return { ok: false, pushed: false, message: 'commit failed' };
+    }
+    console.log(`${tag} Committed local changes`);
+  }
 
   // 2. Pull to integrate remote changes (prefer merge over rebase for simpler conflict resolution)
   const pullResult = git('pull --no-rebase --no-edit', vaultPath);
@@ -166,46 +177,22 @@ export async function syncVaultChanges(
 
       if (!resolved) {
         console.error(`${tag} Claude could not resolve conflicts`);
-        // Still try to preserve local changes
-        if (hasChanges) {
-          git('stash', vaultPath);
-          git('merge --abort', vaultPath);
-          git('stash pop', vaultPath);
-          const commitResult = git(`commit -m "${commitMessage}"`, vaultPath);
-          if (commitResult.ok) {
-            console.log(`${tag} Local changes committed (conflicts unresolved, no push)`);
-            return { ok: true, pushed: false, message: 'committed locally, conflicts unresolved' };
-          }
-        }
-        return { ok: false, pushed: false, message: 'conflict resolution failed' };
+        // Local changes are already committed, so they're safe
+        // Abort the merge to get back to a clean state
+        git('merge --abort', vaultPath);
+        return { ok: true, pushed: false, message: 'committed locally, conflicts unresolved' };
       }
 
       console.log(`${tag} Claude resolved conflicts successfully`);
     } else {
-      // Pull failed for non-conflict reason (network, etc.)
+      // Pull failed for non-conflict reason (network, auth, etc.)
       console.error(`${tag} Pull failed (non-conflict):`, pullResult.output);
-
-      // Commit locally anyway
-      if (hasChanges) {
-        const commitResult = git(`commit -m "${commitMessage}"`, vaultPath);
-        if (commitResult.ok) {
-          console.log(`${tag} Local changes committed (pull failed, no push)`);
-          return { ok: true, pushed: false, message: 'committed locally, pull failed' };
-        }
-      }
-      return { ok: true, pushed: false, message: 'pull failed, nothing to commit' };
+      // Local changes are already committed, so they're safe
+      return { ok: true, pushed: false, message: 'committed locally, pull failed' };
     }
   }
 
-  // 3. Commit if we have local changes (may have been auto-committed during merge)
-  if (hasChanges) {
-    const commitResult = git(`commit -m "${commitMessage}"`, vaultPath);
-    if (!commitResult.ok && !commitResult.output.includes('nothing to commit')) {
-      console.error(`${tag} Commit failed:`, commitResult.output);
-    }
-  }
-
-  // 4. Push
+  // 3. Push
   const pushResult = git('push', vaultPath);
 
   if (!pushResult.ok) {
