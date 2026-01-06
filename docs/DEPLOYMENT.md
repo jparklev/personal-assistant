@@ -4,6 +4,35 @@ This bot is intended to run on a VPS (e.g. DigitalOcean) as a long-lived process
 
 The Obsidian vault is a git repo on disk. **Sync is external** (e.g. `vault-sync.sh` on a timer). The bot only reads/writes the working tree via `OBSIDIAN_VAULT_PATH`.
 
+## Current Deployment
+
+| Resource | Value |
+|----------|-------|
+| **Droplet** | `personal-assistant` |
+| **IP** | `143.198.101.198` |
+| **Region** | sfo3 (San Francisco) |
+| **Size** | s-1vcpu-1gb |
+| **OS** | Ubuntu 24.04 |
+
+### Quick Commands
+
+```bash
+# SSH
+ssh assistant@143.198.101.198
+
+# View logs
+ssh root@143.198.101.198 journalctl -u personal-assistant -f
+
+# Restart
+ssh root@143.198.101.198 systemctl restart personal-assistant
+
+# Status
+ssh root@143.198.101.198 systemctl status personal-assistant
+
+# Manual vault sync
+ssh assistant@143.198.101.198 /home/assistant/bin/vault-sync.sh
+```
+
 ## Conventions
 
 - Bot repo: `/home/assistant/personal-assistant`
@@ -104,7 +133,8 @@ Type=simple
 User=assistant
 WorkingDirectory=/home/assistant/personal-assistant
 EnvironmentFile=/home/assistant/personal-assistant/.env
-ExecStart=/home/assistant/.bun/bin/bun run start
+Environment="PATH=/home/assistant/.bun/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/assistant/.bun/bin/bun dist/index.js
 Restart=always
 RestartSec=3
 
