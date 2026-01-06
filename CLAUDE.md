@@ -144,4 +144,4 @@ ssh root@143.198.101.198 "systemctl restart personal-assistant"
 ssh root@143.198.101.198 "journalctl -u personal-assistant -n 20"
 ```
 
-The VPS tracks `jparklev/vps-provisioning` branch (will be `main` after merge).
+The VPS tracks the `main` branch.
