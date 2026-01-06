@@ -88,8 +88,7 @@ export const commands = [
             .addChannelTypes(ChannelType.GuildCategory)
         )
     )
-    .addSubcommand((sub) => sub.setName('status').setDescription('Show assistant status and configuration'))
-    .addSubcommand((sub) => sub.setName('sync').setDescription('Sync with Obsidian vault')),
+    .addSubcommand((sub) => sub.setName('status').setDescription('Show assistant status and configuration')),
 
   // Utility
   new SlashCommandBuilder().setName('help').setDescription('Show available commands'),

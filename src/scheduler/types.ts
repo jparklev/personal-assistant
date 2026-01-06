@@ -30,4 +30,4 @@ export interface TaskResult {
   data?: Record<string, unknown>;
 }
 
-export type TaskName = 'morning-checkin' | 'weekly-reconsolidation' | 'vault-sync' | 'process-clipper' | 'periodic-nudge';
+export type TaskName = 'morning-checkin' | 'weekly-reconsolidation' | 'periodic-nudge';

@@ -7,7 +7,6 @@
  * File structure:
  *   state/learner.json      -> LearnerState (corrections, patterns, preferences)
  *   state/questions.json    -> QuestionsState (standing questions)
- *   state/vault-sync.json   -> VaultSyncState
  *   state/morning-checkin.json -> MorningCheckinState
  *   state/clipper-processing.json -> ClipperState
  *   context/goals.md        -> Goals (markdown)
@@ -101,13 +100,6 @@ export const DEFAULT_STANDING_QUESTIONS: StandingQuestion[] = [
     enabled: true,
   },
 ];
-
-// ============== Vault Sync State (state/vault-sync.json) ==============
-
-export interface VaultSyncState {
-  lastSyncAt: string | null;
-  lastCommitHash: string | null;
-}
 
 // ============== Morning Checkin State (state/morning-checkin.json) ==============
 

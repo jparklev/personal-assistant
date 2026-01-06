@@ -8,7 +8,6 @@
 import { readState, writeState, writeMemory } from './filesystem';
 import type {
   StandingQuestion,
-  VaultSyncState,
   MorningCheckinState,
   ClipperState,
 } from './types';
@@ -16,25 +15,6 @@ import { DEFAULT_STANDING_QUESTIONS } from './types';
 
 interface QuestionsState {
   questions: StandingQuestion[];
-}
-
-// ============== Vault Sync ==============
-
-const DEFAULT_VAULT_SYNC: VaultSyncState = {
-  lastSyncAt: null,
-  lastCommitHash: null,
-};
-
-export function getLastVaultSync(): { hash: string | null; at: string | null } {
-  const state = readState<VaultSyncState>('vault-sync', DEFAULT_VAULT_SYNC);
-  return { hash: state.lastCommitHash, at: state.lastSyncAt };
-}
-
-export function updateVaultSync(hash: string): void {
-  writeState('vault-sync', {
-    lastSyncAt: new Date().toISOString(),
-    lastCommitHash: hash,
-  });
 }
 
 // ============== Goals ==============

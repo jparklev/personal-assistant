@@ -18,7 +18,7 @@ bun run deploy:commands
 bun run start
 ```
 
-Operational notes: `docs/RUNBOOK.md`.
+Operational notes: `docs/DEPLOYMENT.md`.
 
 ## Data Storage
 
