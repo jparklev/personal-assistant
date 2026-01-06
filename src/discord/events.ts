@@ -1593,7 +1593,7 @@ async function appendMeditationEntry(content: string, message: Message, ctx: App
   // Format the entry with timestamp
   const now = new Date();
   const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-  const entry = `\n## Meditation (${timeStr})\n\n${content}\n`;
+  const entry = `\n### Meditation (${timeStr})\n\n${content}\n`;
 
   try {
     // Ensure daily folder exists
@@ -1602,7 +1602,18 @@ async function appendMeditationEntry(content: string, message: Message, ctx: App
     // Append to daily note
     appendFileSync(dailyNotePath, entry, 'utf-8');
 
-    // Git commit and push the change
+    // Git: pull, commit, and push the change
+    try {
+      // Pull first to handle remote being ahead
+      execSync(`git pull --rebase`, {
+        cwd: vaultPath,
+        timeout: 30000,
+        stdio: 'pipe',
+      });
+    } catch (pullErr: any) {
+      console.error('[MeditationLog] Git pull failed:', pullErr.message);
+    }
+
     try {
       execSync(`git add -A && git commit -m "meditation log: ${today}" && git push`, {
         cwd: vaultPath,
