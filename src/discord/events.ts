@@ -279,6 +279,17 @@ export function registerEventHandlers(client: Client, ctx: AppContext) {
       return;
     }
 
+    // Dailies channel - voice messages appended to daily notes
+    const isDailiesChannel =
+      assistantChannels.dailies
+        ? message.channelId === assistantChannels.dailies
+        : (message.channel as any)?.name === 'dailies';
+
+    if (isDailiesChannel && ctx.state.isAssistantEnabled()) {
+      await handleDailyLog(message, ctx);
+      return;
+    }
+
     // Blips stream: keep a single Components V2 "current blip" card updated.
     const isBlipsStreamChannel =
       assistantChannels.blipsStream
@@ -1637,6 +1648,89 @@ async function appendMeditationEntry(content: string, message: Message, ctx: App
   }
 }
 
+// ============== Daily Log Handler ==============
+
+async function handleDailyLog(message: Message, ctx: AppContext): Promise<void> {
+  // Only handle voice messages
+  const voiceAttachments = getVoiceAttachments(message);
+  if (voiceAttachments.length === 0) {
+    // Text messages can be handled too - just append them directly
+    const text = message.content.trim();
+    if (!text) return;
+
+    await appendDailyEntry(text, message, ctx);
+    return;
+  }
+
+  // Transcribe voice message(s)
+  const { transcripts, errors } = await transcribeMessageVoice(message);
+
+  if (transcripts.length === 0) {
+    if (errors.length > 0) {
+      await message.reply(`Couldn't transcribe voice message: ${errors[0]}`);
+    }
+    return;
+  }
+
+  // Combine all transcripts
+  const fullTranscript = transcripts.join('\n\n');
+  await appendDailyEntry(fullTranscript, message, ctx);
+}
+
+async function appendDailyEntry(content: string, message: Message, ctx: AppContext): Promise<void> {
+  const vaultPath = ctx.cfg.vaultPath;
+
+  // Get today's date in YYYY-MM-DD format
+  const today = new Date().toISOString().split('T')[0];
+  const dailyNotePath = join(vaultPath, 'daily', `${today}.md`);
+
+  // Format the entry with timestamp
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  const entry = `\n### Daily (${timeStr})\n\n${content}\n`;
+
+  try {
+    // Ensure daily folder exists
+    mkdirSync(dirname(dailyNotePath), { recursive: true });
+
+    // Append to daily note
+    appendFileSync(dailyNotePath, entry, 'utf-8');
+
+    // Git: pull, commit, and push the change
+    try {
+      // Pull first to handle remote being ahead
+      execSync(`git pull --rebase`, {
+        cwd: vaultPath,
+        timeout: 30000,
+        stdio: 'pipe',
+      });
+    } catch (pullErr: any) {
+      console.error('[DailyLog] Git pull failed:', pullErr.message);
+    }
+
+    try {
+      execSync(`git add -A && git commit -m "daily log: ${today}" && git push`, {
+        cwd: vaultPath,
+        timeout: 30000,
+        stdio: 'pipe',
+      });
+    } catch (gitErr: any) {
+      // Commit might fail if nothing to commit (already committed) - that's ok
+      if (!gitErr.message?.includes('nothing to commit')) {
+        console.error('[DailyLog] Git commit failed:', gitErr.message);
+      }
+    }
+
+    // React with thumbs up and reply with word count
+    const wordCount = content.split(/\s+/).filter(Boolean).length;
+    await message.react('👍');
+    await message.reply(`Logged ${wordCount} words to \`daily/${today}.md\``);
+  } catch (err: any) {
+    console.error('[DailyLog] Failed to append:', err);
+    await message.reply(`Failed to log daily: ${err.message}`);
+  }
+}
+
 // ============== Blip Handlers ==============
 
 async function handleBlip(interaction: ChatInputCommandInteraction, ctx: AppContext) {
@@ -1867,18 +1961,26 @@ async function handleAssistant(interaction: ChatInputCommandInteraction, ctx: Ap
     }
 
     case 'channel': {
-      const type = interaction.options.getString('type', true) as 'morningCheckin' | 'blips' | 'blipsStream' | 'lobby';
+      const type = interaction.options.getString('type', true) as
+        | 'morningCheckin'
+        | 'blips'
+        | 'blipsStream'
+        | 'lobby'
+        | 'meditationLogs'
+        | 'dailies';
       const channel = interaction.options.getChannel('channel', true);
 
       await ctx.state.transact(async () => {
         ctx.state.setAssistantChannel(type, channel.id);
       });
 
-      const typeNames = {
+      const typeNames: Record<string, string> = {
         morningCheckin: 'Morning Check-in',
         blips: 'Blips',
         blipsStream: 'Blips Stream',
         lobby: 'Lobby',
+        meditationLogs: 'Meditation Logs',
+        dailies: 'Dailies',
       };
 
       await interaction.reply({
