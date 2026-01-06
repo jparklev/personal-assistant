@@ -31,6 +31,7 @@ import { extractUrls } from '../captures';
 import { captureUrlToFile } from '../captures/capture-url';
 import { getDueQuestions, markQuestionAsked } from '../memory';
 import { getVoiceAttachments, transcribeMessageVoice, getTranscriptionMethod } from './voice';
+import { syncVaultChanges } from '../vault/git-sync';
 
 export interface AppContext {
   cfg: AppConfig;
@@ -1613,44 +1614,16 @@ async function appendMeditationEntry(content: string, message: Message, ctx: App
     // Append to daily note
     appendFileSync(dailyNotePath, entry, 'utf-8');
 
-    // Git: pull, commit, and push the change
-    // If pull fails, still commit locally but skip push (vault-sync timer will handle it)
-    let pullOk = true;
-    try {
-      execSync(`git pull --rebase`, {
-        cwd: vaultPath,
-        timeout: 30000,
-        stdio: 'pipe',
-      });
-    } catch (pullErr: any) {
-      pullOk = false;
-      console.error('[MeditationLog] Git pull failed:', pullErr.message);
-    }
-
-    try {
-      // Always commit locally so the change is captured
-      const commitCmd = pullOk
-        ? `git add -A && git commit -m "meditation log: ${today}" && git push`
-        : `git add -A && git commit -m "meditation log: ${today}"`;  // Skip push if pull failed
-      execSync(commitCmd, {
-        cwd: vaultPath,
-        timeout: 30000,
-        stdio: 'pipe',
-      });
-      if (!pullOk) {
-        console.log('[MeditationLog] Committed locally; skipped push (pull failed). vault-sync will handle it.');
-      }
-    } catch (gitErr: any) {
-      // Commit might fail if nothing to commit (already committed) - that's ok
-      if (!gitErr.message?.includes('nothing to commit')) {
-        console.error('[MeditationLog] Git commit failed:', gitErr.message);
-      }
-    }
+    // Sync to git (with Claude-based conflict resolution if needed)
+    const syncResult = await syncVaultChanges(vaultPath, `meditation log: ${today}`);
+    console.log('[MeditationLog]', syncResult.message);
 
     // React with thumbs up and reply with word count
     const wordCount = content.split(/\s+/).filter(Boolean).length;
     await message.react('👍');
-    await message.reply(`Logged ${wordCount} words to \`Daily/${today}.md\``);
+
+    const syncStatus = syncResult.pushed ? '' : ' (sync pending)';
+    await message.reply(`Logged ${wordCount} words to \`Daily/${today}.md\`${syncStatus}`);
   } catch (err: any) {
     console.error('[MeditationLog] Failed to append:', err);
     await message.reply(`Failed to log meditation: ${err.message}`);
@@ -1705,44 +1678,16 @@ async function appendDailyEntry(content: string, message: Message, ctx: AppConte
     // Append to daily note
     appendFileSync(dailyNotePath, entry, 'utf-8');
 
-    // Git: pull, commit, and push the change
-    // If pull fails, still commit locally but skip push (vault-sync timer will handle it)
-    let pullOk = true;
-    try {
-      execSync(`git pull --rebase`, {
-        cwd: vaultPath,
-        timeout: 30000,
-        stdio: 'pipe',
-      });
-    } catch (pullErr: any) {
-      pullOk = false;
-      console.error('[DailyLog] Git pull failed:', pullErr.message);
-    }
-
-    try {
-      // Always commit locally so the change is captured
-      const commitCmd = pullOk
-        ? `git add -A && git commit -m "daily log: ${today}" && git push`
-        : `git add -A && git commit -m "daily log: ${today}"`;  // Skip push if pull failed
-      execSync(commitCmd, {
-        cwd: vaultPath,
-        timeout: 30000,
-        stdio: 'pipe',
-      });
-      if (!pullOk) {
-        console.log('[DailyLog] Committed locally; skipped push (pull failed). vault-sync will handle it.');
-      }
-    } catch (gitErr: any) {
-      // Commit might fail if nothing to commit (already committed) - that's ok
-      if (!gitErr.message?.includes('nothing to commit')) {
-        console.error('[DailyLog] Git commit failed:', gitErr.message);
-      }
-    }
+    // Sync to git (with Claude-based conflict resolution if needed)
+    const syncResult = await syncVaultChanges(vaultPath, `daily log: ${today}`);
+    console.log('[DailyLog]', syncResult.message);
 
     // React with thumbs up and reply with word count
     const wordCount = content.split(/\s+/).filter(Boolean).length;
     await message.react('👍');
-    await message.reply(`Logged ${wordCount} words to \`Daily/${today}.md\``);
+
+    const syncStatus = syncResult.pushed ? '' : ' (sync pending)';
+    await message.reply(`Logged ${wordCount} words to \`Daily/${today}.md\`${syncStatus}`);
   } catch (err: any) {
     console.error('[DailyLog] Failed to append:', err);
     await message.reply(`Failed to log daily: ${err.message}`);
