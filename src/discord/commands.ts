@@ -71,7 +71,9 @@ export const commands = [
               { name: 'Morning Check-in', value: 'morningCheckin' },
               { name: 'Blips', value: 'blips' },
               { name: 'Blips Stream', value: 'blipsStream' },
-              { name: 'Lobby', value: 'lobby' }
+              { name: 'Lobby', value: 'lobby' },
+              { name: 'Meditation Logs', value: 'meditationLogs' },
+              { name: 'Dailies', value: 'dailies' }
             )
         )
         .addChannelOption((opt) => opt.setName('channel').setDescription('Channel to use').setRequired(true))
