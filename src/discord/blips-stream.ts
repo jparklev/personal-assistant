@@ -11,20 +11,15 @@ import {
   TextInputStyle,
 } from 'discord.js';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { basename, dirname, join } from 'path';
+import { dirname, join } from 'path';
 import { loadConfig } from '../config';
-import { invokeClaude } from '../assistant/runner';
 import {
   getBlipsToSurface,
-  listBlips,
   readBlip,
   snoozeBlip,
   archiveBlip,
   touchBlip,
   appendToLog,
-  bumpToProject,
-  suggestMoves,
-  findRelated,
 } from '../blips';
 
 const BLIPS_STREAM_CUSTOM_ID_PREFIX = 'blips_stream:';
@@ -33,18 +28,6 @@ const BLIPS_STREAM_MODAL_PREFIX = 'blips_stream_modal:';
 type StreamState = {
   messageId?: string;
   currentFilename?: string;
-  view?: 'normal' | 'related' | 'prompt';
-  busy?: { kind: 'ai_related' | 'prompt'; at: string };
-  prompt?: {
-    questions: string[];
-  };
-  relatedAi?: {
-    forFilename: string;
-    status: 'loading' | 'done' | 'error';
-    items: Array<{ filename: string; title: string }>;
-    at: string;
-    error?: string;
-  };
 };
 
 type StreamStateFile = Record<string, StreamState>;
@@ -79,7 +62,6 @@ function getNextBlipFilename(excludeFilename?: string): string | null {
     if (excludeFilename && c.filename === excludeFilename) continue;
     return c.filename;
   }
-  // If everything is excluded, allow the current one.
   if (excludeFilename) {
     const again = getBlipsToSurface(1)[0];
     return again?.filename || null;
@@ -101,128 +83,37 @@ function excerptBlipContent(raw: string, maxLen: number): string {
   return trimmed.slice(0, maxLen - 1) + '…';
 }
 
-function excerptCaptureText(raw: string, maxLen: number): string {
-  const m = raw.match(/##\s+Extracted Text\s*\n([\s\S]*?)(?:\n##\s+Raw HTML\b|$)/i);
-  const content = (m?.[1] || raw).trim();
-  if (!content) return '';
-  if (content.length <= maxLen) return content;
-  return content.slice(0, maxLen - 1) + '…';
-}
-
 function renderBlipCard(opts: {
   filename: string;
-  view?: StreamState['view'];
-  prompt?: StreamState['prompt'];
-  relatedAi?: StreamState['relatedAi'];
-  busy?: StreamState['busy'];
   mode?: 'active' | 'done';
 }): {
   flags: number;
   components: any[];
 } {
-  const filename = opts.filename;
+  const { filename, mode = 'active' } = opts;
   const cfg = loadConfig();
   const path = join(cfg.blipsDir, filename);
   const blip = readBlip(path);
 
   const title = blip?.title || filename.replace(/\.md$/i, '');
-  const status = blip?.status || 'active';
   const touched = blip?.touched || '';
   const created = blip?.created || '';
-  const tags = blip?.tags && blip.tags.length > 0 ? blip.tags.join(', ') : '';
 
-  let statusLine = `Status: ${status}`;
-  const snoozedUntil = (blip?.frontmatter as any)?.snoozed_until;
-  if (status === 'snoozed' && typeof snoozedUntil === 'string' && snoozedUntil) {
-    statusLine += ` (until ${snoozedUntil})`;
-  }
-
-  const source = blip?.source ? `Source: ${blip.source}` : '';
-  const captureName = (blip?.frontmatter as any)?.capture;
-  const capture = typeof captureName === 'string' && captureName ? `Capture: ${captureName}` : '';
-
-  const moves = blip ? suggestMoves(blip).filter((m) => !['snooze', 'archive', 'bump-to-project'].includes(m.move)) : [];
-  const moveLine = moves.length > 0 ? `Suggested: ${moves.slice(0, 3).map((m) => m.label).join(' · ')}` : '';
-
-  const mode = opts.mode || 'active';
-  const busy = opts.busy;
-  const busyLine =
-    mode === 'active' && busy
-      ? busy.kind === 'ai_related'
-        ? '_Working: finding AI-related blips…_'
-        : busy.kind === 'prompt'
-          ? '_Working: generating prompts…_'
-          : ''
-      : '';
-  const meta = [
-    `**${title}**`,
-    [statusLine, touched ? `touched ${touched}` : '', created ? `created ${created}` : ''].filter(Boolean).join(' · '),
-    tags ? `Tags: ${tags}` : '',
-    source,
-    capture,
-    moveLine,
-    busyLine,
-  ]
+  const dateLine = [touched ? `touched ${touched}` : '', created ? `created ${created}` : '']
     .filter(Boolean)
-    .join('\n');
+    .join(' · ');
 
-  let excerpt = blip ? excerptBlipContent(blip.content, 450) : '';
-  if (!excerpt && typeof captureName === 'string' && captureName) {
-    const capturePath = join(cfg.assistantDir, 'captures', captureName);
-    if (existsSync(capturePath)) {
-      const raw = readFileSync(capturePath, 'utf-8');
-      const snippet = excerptCaptureText(raw, 220);
-      if (snippet) excerpt = `_${snippet}_\n\n(Use **Capture** to view more.)`;
-    }
-  }
-  if (!excerpt && capture) excerpt = '_No notes yet. Use **Capture** to view the captured text._';
-  const view = opts.view || 'normal';
-  if (view === 'related' && blip) {
-    const relatedAi = opts.relatedAi && opts.relatedAi.forFilename === filename ? opts.relatedAi : null;
-    const aiItems = relatedAi ? relatedAi.items.slice(0, 3) : [];
-    let aiText = '';
-    if (relatedAi) {
-      if (relatedAi.status === 'loading') {
-        aiText = `\n\n**AI related:** _searching…_`;
-      } else if (relatedAi.status === 'error') {
-        aiText = `\n\n**AI related:** _error: ${(relatedAi.error || 'unknown error').slice(0, 200)}_`;
-      } else if (aiItems.length > 0) {
-        aiText = `\n\n**AI related:**\n${aiItems.map((r) => `- ${r.title} (${r.filename})`).join('\n')}`;
-      } else {
-        aiText = `\n\n**AI related:** _none_`;
-      }
-    }
-
-    const relatedPaths = findRelated(blip.path);
-    const keywordRelated = relatedPaths
-      .map((p) => {
-        const b = readBlip(p);
-        const fn = basename(p);
-        return b ? { title: b.title, filename: fn } : { title: fn.replace(/\.md$/i, ''), filename: fn };
-      })
-      .slice(0, 3);
-
-    const relatedText =
-      keywordRelated.length > 0
-        ? `\n\n**Related:**\n${keywordRelated.map((r) => `- ${r.title} (${r.filename})`).join('\n')}`
-        : `\n\n_No obvious related blips found._`;
-
-    excerpt = (excerpt || '') + (aiText || '') + relatedText;
-  }
-  if (view === 'prompt' && opts.prompt && opts.prompt.questions.length > 0) {
-    excerpt =
-      (excerpt || '') +
-      `\n\n**Questions:**\n${opts.prompt.questions.map((q) => `- ${q}`).join('\n')}\n\n(Use **Answer** to respond, or **Skip**.)`;
-  }
+  const meta = [`**${title}**`, dateLine].filter(Boolean).join('\n');
+  const excerpt = blip ? excerptBlipContent(blip.content, 600) : '';
 
   const header: any = { type: ComponentType.TextDisplay, content: meta };
   const sep: any = { type: ComponentType.Separator };
   const body: any = {
     type: ComponentType.TextDisplay,
-    content: excerpt ? excerpt : '_No notes yet._',
+    content: excerpt || '_No notes yet._',
   };
 
-  const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}next:${filename}`)
       .setLabel('Next')
@@ -232,12 +123,8 @@ function renderBlipCard(opts: {
       .setLabel('Thoughts')
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
-      .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}prompt:${filename}`)
-      .setLabel('Prompt')
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}details:${filename}`)
-      .setLabel('Details')
+      .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}snooze:${filename}`)
+      .setLabel('Snooze')
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}archive:${filename}`)
@@ -245,68 +132,14 @@ function renderBlipCard(opts: {
       .setStyle(ButtonStyle.Danger)
   );
 
-  const row2Buttons: ButtonBuilder[] = [
-    new ButtonBuilder()
-      .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}snooze1:${filename}`)
-      .setLabel('Snooze 1d')
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}snooze7:${filename}`)
-      .setLabel('Snooze 7d')
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}snooze30:${filename}`)
-      .setLabel('Snooze 30d')
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}related:${filename}`)
-      .setLabel(view === 'related' ? 'Back' : 'Related')
-      .setStyle(ButtonStyle.Secondary),
-    view === 'related'
-      ? new ButtonBuilder()
-          .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}ai_related:${filename}`)
-          .setLabel('AI related')
-          .setStyle(ButtonStyle.Secondary)
-      : new ButtonBuilder()
-          .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}capture:${filename}`)
-          .setLabel('Capture')
-          .setStyle(ButtonStyle.Secondary),
-  ];
-
-  const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(...row2Buttons);
-
-  let row3: ActionRowBuilder<ButtonBuilder> | null = null;
-  if (view === 'prompt') {
-    row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}answer:${filename}`)
-        .setLabel('Answer')
-        .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}skip:${filename}`)
-        .setLabel('Skip')
-        .setStyle(ButtonStyle.Secondary)
-    );
-  } else {
-    row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`${BLIPS_STREAM_CUSTOM_ID_PREFIX}bump:${filename}`)
-        .setLabel('Bump')
-        .setStyle(ButtonStyle.Secondary)
-    );
-  }
-
   if (mode === 'done') {
-    for (const b of (row1.components as ButtonBuilder[])) b.setDisabled(true);
-    for (const b of (row2.components as ButtonBuilder[])) b.setDisabled(true);
-    if (row3) for (const b of (row3.components as ButtonBuilder[])) b.setDisabled(true);
+    for (const b of row.components as ButtonBuilder[]) b.setDisabled(true);
   }
 
   const container: any = {
     type: ComponentType.Container,
-    components: [header, sep, body, row1.toJSON(), row2.toJSON()],
+    components: [header, sep, body, row.toJSON()],
   };
-  if (row3) container.components.push(row3.toJSON());
 
   return { flags: MessageFlags.IsComponentsV2, components: [container] };
 }
@@ -343,13 +176,7 @@ export async function ensureBlipsStreamCard(opts: {
   const filename = wanted || getNextBlipFilename() || null;
   if (!filename) return;
 
-  const payload = renderBlipCard({
-    filename,
-    view: slot.view,
-    prompt: slot.prompt,
-    relatedAi: slot.relatedAi,
-    busy: slot.busy,
-  });
+  const payload = renderBlipCard({ filename });
   slot.currentFilename = filename;
 
   if (slot.messageId) {
@@ -383,14 +210,6 @@ export function isBlipsStreamCustomId(customId: string): boolean {
   return customId.startsWith(BLIPS_STREAM_CUSTOM_ID_PREFIX) || customId.startsWith(BLIPS_STREAM_MODAL_PREFIX);
 }
 
-async function maybeSendTyping(interaction: ButtonInteraction): Promise<void> {
-  const ch: any = interaction.channel as any;
-  if (!ch) return;
-  const fn = ch.sendTyping;
-  if (typeof fn !== 'function') return;
-  await fn.call(ch).catch(() => {});
-}
-
 async function refreshInPlace(message: Message, filename: string | null): Promise<void> {
   if (!filename) {
     await message.edit({
@@ -406,21 +225,13 @@ async function refreshInPlace(message: Message, filename: string | null): Promis
     } as any);
     return;
   }
-  const state = readStreamState();
-  const slot = state[message.channelId] || {};
-  await message.edit(
-    renderBlipCard({ filename, view: slot.view, prompt: slot.prompt, relatedAi: slot.relatedAi, busy: slot.busy }) as any
-  );
+  await message.edit(renderBlipCard({ filename }) as any);
 }
 
 async function sendNewCard(message: Message, filename: string | null): Promise<Message | null> {
   if (!filename) return null;
-  const state = readStreamState();
-  const slot = state[message.channelId] || {};
   const ch = message.channel as TextChannel;
-  const sent = await ch
-    .send(renderBlipCard({ filename, view: slot.view, prompt: slot.prompt, relatedAi: slot.relatedAi, busy: slot.busy }) as any)
-    .catch(() => null);
+  const sent = await ch.send(renderBlipCard({ filename }) as any).catch(() => null);
   return sent as any;
 }
 
@@ -428,18 +239,14 @@ async function advanceCard(message: Message, currentFilename?: string): Promise<
   const next = getNextBlipFilename(currentFilename) || null;
   const state = readStreamState();
   const slot = (state[message.channelId] ||= {});
-  slot.view = 'normal';
-  delete slot.busy;
-  delete slot.prompt;
-  delete slot.relatedAi;
   writeStreamState(state);
 
-  // Finalize the current card in-place so it remains in history.
+  // Finalize the current card in-place so it remains in history
   if (currentFilename) {
     await message.edit(renderBlipCard({ filename: currentFilename, mode: 'done' }) as any).catch(() => {});
   }
 
-  // Post the next blip as a new message.
+  // Post the next blip as a new message
   const nextMsg = await sendNewCard(message, next);
   slot.messageId = nextMsg?.id;
   slot.currentFilename = next || undefined;
@@ -450,9 +257,6 @@ async function advanceCardFallback(client: Client, guild: Guild | null, channelI
   const next = getNextBlipFilename(currentFilename) || null;
   const state = readStreamState();
   const slot = (state[channelId] ||= {});
-  slot.view = 'normal';
-  delete slot.busy;
-  delete slot.prompt;
   slot.currentFilename = next || undefined;
   writeStreamState(state);
 
@@ -497,7 +301,7 @@ export async function handleBlipsStreamButton(interaction: ButtonInteraction): P
   const slot = state[interaction.channelId] || {};
   const current = slot.currentFilename;
 
-  // Stale safety: if the button is for a different blip than the current card, just refresh.
+  // Stale safety: if the button is for a different blip than the current card, just refresh
   if (current && filename !== current) {
     await interaction.reply({ content: 'That card is no longer active.', ephemeral: true }).catch(() => {});
     return;
@@ -506,7 +310,7 @@ export async function handleBlipsStreamButton(interaction: ButtonInteraction): P
   if (verb === 'thoughts') {
     const modal = new ModalBuilder()
       .setCustomId(`${BLIPS_STREAM_MODAL_PREFIX}thoughts:${message.id}:${filename}`)
-      .setTitle('Add thoughts to blip');
+      .setTitle('Add thoughts');
 
     const input = new TextInputBuilder()
       .setCustomId('thoughts')
@@ -520,109 +324,10 @@ export async function handleBlipsStreamButton(interaction: ButtonInteraction): P
     return;
   }
 
-  if (verb === 'bump') {
-    const modal = new ModalBuilder()
-      .setCustomId(`${BLIPS_STREAM_MODAL_PREFIX}bump:${message.id}:${filename}`)
-      .setTitle('Bump blip to project');
-
-    const input = new TextInputBuilder()
-      .setCustomId('path')
-      .setLabel('Project path (relative or absolute)')
-      .setStyle(TextInputStyle.Short)
-      .setRequired(true)
-      .setMaxLength(200);
-
-    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
-    await interaction.showModal(modal).catch(() => {});
-    return;
-  }
-
-  if (verb === 'answer') {
-    const modal = new ModalBuilder()
-      .setCustomId(`${BLIPS_STREAM_MODAL_PREFIX}answer:${message.id}:${filename}`)
-      .setTitle('Answer prompts');
-
-    const input = new TextInputBuilder()
-      .setCustomId('answer')
-      .setLabel('Your answers (freeform)')
-      .setStyle(TextInputStyle.Paragraph)
-      .setRequired(true)
-      .setMaxLength(1500);
-
-    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
-    await interaction.showModal(modal).catch(() => {});
-    return;
-  }
-
   const path = blipPathFromFilename(filename);
-  if (verb === 'details') {
-    if (!blipExists(filename)) {
-      await interaction.reply({ content: 'That blip file no longer exists; advancing.', ephemeral: true }).catch(() => {});
-      await advanceCard(message, filename);
-      return;
-    }
-    const blip = readBlip(path);
-    if (!blip) {
-      await interaction.reply({ content: 'Blip not found on disk.', ephemeral: true }).catch(() => {});
-      return;
-    }
-
-    const captureName = (blip.frontmatter as any)?.capture;
-    const capturePath = typeof captureName === 'string' && captureName ? `~/.assistant/captures/${captureName}` : '(none)';
-    const content = excerptBlipContent(blip.content, 1800) || '(no notes yet)';
-    const text = [
-      `**${blip.title}**`,
-      `Status: ${blip.status}`,
-      blip.touched ? `Touched: ${blip.touched}` : '',
-      blip.created ? `Created: ${blip.created}` : '',
-      blip.source ? `Source: ${blip.source}` : '',
-      `Capture: ${capturePath}`,
-      '',
-      content,
-    ]
-      .filter(Boolean)
-      .join('\n');
-
-    await interaction.reply({ content: text.slice(0, 2000), ephemeral: true }).catch(() => {});
-    return;
-  }
-
-  if (verb === 'capture') {
-    if (!blipExists(filename)) {
-      await interaction.reply({ content: 'That blip file no longer exists; advancing.', ephemeral: true }).catch(() => {});
-      await advanceCard(message, filename);
-      return;
-    }
-    const blip = readBlip(path);
-    const captureName = (blip?.frontmatter as any)?.capture;
-    if (!captureName || typeof captureName !== 'string') {
-      await interaction.reply({ content: 'No capture file is linked for this blip.', ephemeral: true }).catch(() => {});
-      return;
-    }
-
-    const cfg = loadConfig();
-    const capturePath = join(cfg.assistantDir, 'captures', captureName);
-    if (!existsSync(capturePath)) {
-      await interaction.reply({
-        content: `Capture file not found at \`~/.assistant/captures/${captureName}\`.`,
-        ephemeral: true,
-      }).catch(() => {});
-      return;
-    }
-
-    const raw = readFileSync(capturePath, 'utf-8');
-    const excerpt = excerptCaptureText(raw, 1800) || '(empty capture)';
-    const text = [`**Capture excerpt**`, `Full capture: \`~/.assistant/captures/${captureName}\``, '', excerpt].join('\n');
-    await interaction.reply({ content: text.slice(0, 2000), ephemeral: true }).catch(() => {});
-    return;
-  }
-
-  if (verb === 'do') {
-    await interaction.reply({ content: 'AI move is disabled.', ephemeral: true }).catch(() => {});
-    return;
-  }
 
   await interaction.deferUpdate().catch(() => {});
+
   if (verb === 'archive') {
     archiveBlip(path);
     await advanceCard(message, filename);
@@ -635,149 +340,11 @@ export async function handleBlipsStreamButton(interaction: ButtonInteraction): P
     return;
   }
 
-  if (verb === 'related') {
-    const state2 = readStreamState();
-    const slot2 = (state2[interaction.channelId] ||= {});
-    if (slot2.view === 'related') {
-      slot2.view = 'normal';
-      delete slot2.relatedAi;
-    } else {
-      slot2.view = 'related';
-    }
-    writeStreamState(state2);
-    await refreshInPlace(message, filename);
-    return;
-  }
-
-  if (verb === 'ai_related') {
-    const blip = readBlip(path);
-    if (!blip) {
-      await advanceCard(message, filename);
-      return;
-    }
-
-    const state2 = readStreamState();
-    const slot2 = (state2[interaction.channelId] ||= {});
-    slot2.view = 'related';
-    slot2.busy = { kind: 'ai_related', at: new Date().toISOString() };
-    slot2.relatedAi = { forFilename: filename, status: 'loading', items: [], at: new Date().toISOString() };
-    writeStreamState(state2);
-    await refreshInPlace(message, filename);
-    await maybeSendTyping(interaction);
-
-    try {
-      const cfg = loadConfig();
-      const blipsDir = cfg.blipsDir;
-
-      const prompt = `You are helping a personal blips system.\n\nYou are currently running in a directory full of markdown blips.\nYour job: find up to 3 *related* blips to the target blip.\n\nTarget blip:\nTitle: ${blip.title}\nTags: ${(blip.tags || []).join(', ')}\nSource: ${blip.source || ''}\nContent excerpt:\n${excerptBlipContent(blip.content, 1200)}\n\nUse any Claude Code tools you want (Glob/Grep/Read, etc.) to explore the blips.\nPrefer semantic relatedness (same theme, same project, same question) over exact keyword matches.\n\nOutput ONLY JSON: {\"related\":[\"filename.md\", ...]}\n`;
-
-      const res = await invokeClaude(prompt, { model: 'haiku', cwd: blipsDir, timeoutMs: 3 * 60 * 1000 });
-      let filenames: string[] = [];
-      try {
-        const parsed = JSON.parse((res.text || '').trim());
-        if (Array.isArray(parsed?.related)) {
-          filenames = parsed.related.filter((f: any) => typeof f === 'string' && f.trim()).slice(0, 3);
-        }
-      } catch {}
-
-      const items = filenames
-        .map((fn) => {
-          try {
-            const p = join(blipsDir, fn);
-            const b = readBlip(p);
-            if (!b) return null;
-            return { filename: fn, title: b.title || fn.replace(/\.md$/i, '') };
-          } catch {
-            return null;
-          }
-        })
-        .filter(Boolean) as Array<{ filename: string; title: string }>;
-
-      const state3 = readStreamState();
-      const slot3 = (state3[interaction.channelId] ||= {});
-      slot3.view = 'related';
-      delete slot3.busy;
-      slot3.relatedAi = { forFilename: filename, status: 'done', items, at: new Date().toISOString() };
-      writeStreamState(state3);
-      await refreshInPlace(message, filename);
-      return;
-    } catch (e: any) {
-      const state3 = readStreamState();
-      const slot3 = (state3[interaction.channelId] ||= {});
-      slot3.view = 'related';
-      delete slot3.busy;
-      slot3.relatedAi = {
-        forFilename: filename,
-        status: 'error',
-        items: [],
-        at: new Date().toISOString(),
-        error: e?.message || String(e),
-      };
-      writeStreamState(state3);
-      await refreshInPlace(message, filename);
-      return;
-    }
-  }
-
-  if (verb === 'prompt') {
-    const blip = readBlip(path);
-    if (!blip) {
-      await advanceCard(message, filename);
-      return;
-    }
-
-    const state0 = readStreamState();
-    const slot0 = (state0[interaction.channelId] ||= {});
-    slot0.busy = { kind: 'prompt', at: new Date().toISOString() };
-    writeStreamState(state0);
-    await refreshInPlace(message, filename);
-    await maybeSendTyping(interaction);
-
-    const prompt = `You are helping a personal blips system.\n\nHere is a blip:\n\nTitle: ${blip.title}\nStatus: ${blip.status}\nContent:\n${blip.content.slice(0, 2500)}\n\nWrite 1-3 short, concrete questions that would help the user update this blip (progress, changes, direction, next step). If no questions are helpful, output an empty list.\n\nOutput ONLY JSON: {\"questions\": [\"...\"]}\n`;
-    const res = await invokeClaude(prompt, { model: 'haiku' });
-    let qs: string[] = [];
-    try {
-      const parsed = JSON.parse((res.text || '').trim());
-      if (Array.isArray(parsed?.questions)) {
-        qs = parsed.questions.filter((q: any) => typeof q === 'string' && q.trim()).slice(0, 3);
-      }
-    } catch {}
-
-    const state2 = readStreamState();
-    const slot2 = (state2[interaction.channelId] ||= {});
-    slot2.view = 'prompt';
-    delete slot2.busy;
-    delete slot2.relatedAi;
-    slot2.prompt = { questions: qs.length > 0 ? qs : ['What’s changed since you captured this?', 'Any new examples, constraints, or direction?', 'What would be a tiny next step?'] };
-    writeStreamState(state2);
-    await refreshInPlace(message, filename);
-    return;
-  }
-
-  if (verb === 'skip') {
-    await advanceCard(message, filename);
-    return;
-  }
-
-  if (verb === 'snooze7') {
+  if (verb === 'snooze') {
     snoozeBlip(path, addDaysIso(7));
     await advanceCard(message, filename);
     return;
   }
-
-  if (verb === 'snooze1') {
-    snoozeBlip(path, addDaysIso(1));
-    await advanceCard(message, filename);
-    return;
-  }
-
-  if (verb === 'snooze30') {
-    snoozeBlip(path, addDaysIso(30));
-    await advanceCard(message, filename);
-    return;
-  }
-
-  // verb === 'do' is handled above (disabled).
 }
 
 export async function handleBlipsStreamModal(interaction: ModalSubmitInteraction): Promise<void> {
@@ -794,7 +361,6 @@ export async function handleBlipsStreamModal(interaction: ModalSubmitInteraction
 
   await interaction.deferUpdate().catch(() => {});
 
-  // Prefer message id encoded in modal customId (most reliable); fallback to state lookup.
   let streamMsg: Message | null = null;
   if (messageId && interaction.channelId) {
     const ch = await interaction.client.channels.fetch(interaction.channelId).catch(() => null);
@@ -811,36 +377,6 @@ export async function handleBlipsStreamModal(interaction: ModalSubmitInteraction
   if (verb === 'thoughts') {
     const thoughts = interaction.fields.getTextInputValue('thoughts').trim();
     if (thoughts) appendToLog(path, `Thoughts: ${thoughts}`);
-    if (streamMsg) {
-      await advanceCard(streamMsg, filename);
-    } else if (interaction.channelId) {
-      await advanceCardFallback(interaction.client as any, interaction.guild as any, interaction.channelId, filename);
-    }
-    return;
-  }
-
-  if (verb === 'bump') {
-    const projectPath = interaction.fields.getTextInputValue('path').trim();
-    if (projectPath) bumpToProject(path, projectPath);
-    if (streamMsg) {
-      await advanceCard(streamMsg, filename);
-    } else if (interaction.channelId) {
-      await advanceCardFallback(interaction.client as any, interaction.guild as any, interaction.channelId, filename);
-    }
-    return;
-  }
-
-  if (verb === 'answer') {
-    const answer = interaction.fields.getTextInputValue('answer').trim();
-    const state = readStreamState();
-    const channelId = interaction.channelId;
-    const slot = channelId ? state[channelId] : undefined;
-    const qs = slot?.prompt?.questions || [];
-    if (qs.length > 0) {
-      appendToLog(path, `Prompt answers:\n${qs.map((q: string, i: number) => `${i + 1}. ${q}`).join('\n')}\n\n${answer}`);
-    } else if (answer) {
-      appendToLog(path, `Prompt answers:\n${answer}`);
-    }
     if (streamMsg) {
       await advanceCard(streamMsg, filename);
     } else if (interaction.channelId) {
