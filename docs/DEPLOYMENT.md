@@ -282,7 +282,35 @@ systemctl enable --now vault-sync.timer
 systemctl list-timers --all | grep vault-sync
 ```
 
-## Upgrades
+## Automated Deployment (GitHub Actions)
+
+Pushes to `main` automatically deploy to the VPS via GitHub Actions.
+
+### Required Secrets
+
+Configure these in GitHub repo settings (Settings > Secrets and variables > Actions):
+
+| Secret | Value |
+|--------|-------|
+| `VPS_HOST` | `143.198.101.198` |
+| `VPS_USER` | `assistant` |
+| `VPS_SSH_KEY` | Private SSH key with access to VPS |
+
+### Generating a deploy key
+
+```bash
+# Generate a dedicated deploy key
+ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/deploy_key -N ""
+
+# Add public key to VPS (both users need it)
+ssh-copy-id -i ~/.ssh/deploy_key.pub assistant@143.198.101.198
+ssh-copy-id -i ~/.ssh/deploy_key.pub root@143.198.101.198
+
+# Copy private key content to GitHub secret VPS_SSH_KEY
+cat ~/.ssh/deploy_key
+```
+
+### Manual Upgrades
 
 Bot repo:
 
