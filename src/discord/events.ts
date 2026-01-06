@@ -690,9 +690,27 @@ async function resolveAssistantCategoryId(guild: any, ctx: AppContext): Promise<
 }
 
 async function handleLobbyMessage(message: Message, ctx: AppContext): Promise<void> {
-  const text = message.content.trim();
-  if (!text) return;
+  let text = message.content.trim();
   if (!message.guild) return;
+
+  // Check for voice message attachments and transcribe them
+  const voiceAttachments = getVoiceAttachments(message);
+  if (voiceAttachments.length > 0) {
+    const { transcripts, errors } = await transcribeMessageVoice(message);
+
+    if (transcripts.length > 0) {
+      const voiceText = transcripts.map((t, i) =>
+        voiceAttachments.length > 1 ? `[Voice message ${i + 1}]: ${t}` : `[Voice message]: ${t}`
+      ).join('\n\n');
+
+      text = text ? `${voiceText}\n\n${text}` : voiceText;
+    } else if (errors.length > 0 && !text) {
+      await message.reply(`Couldn't transcribe voice message: ${errors[0]}`);
+      return;
+    }
+  }
+
+  if (!text) return;
 
   // Confirm/reject a pending action by replying to the proposal message.
   if (message.reference?.messageId) {
