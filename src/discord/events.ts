@@ -1678,7 +1678,7 @@ ${buildAssistantContext()}
 3. For each item worth capturing, describe what it is
 
 For now, just report what you find. Output a brief summary.`,
-        { model: 'sonnet' }
+        { model: 'opus' }
       );
 
       await interaction.editReply({
