@@ -1604,7 +1604,7 @@ async function appendMeditationEntry(content: string, message: Message, ctx: App
   // Format the entry with timestamp (Pacific time)
   const now = new Date();
   const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/Los_Angeles' });
-  const entry = `\n**Meditation (${timeStr} PT)**\n\n${content}\n`;
+  const entry = `\n### Meditation (${timeStr} PT)\n\n${content}\n`;
 
   try {
     // Ensure daily folder exists
@@ -1687,7 +1687,7 @@ async function appendDailyEntry(content: string, message: Message, ctx: AppConte
   // Format the entry with timestamp (Pacific time)
   const now = new Date();
   const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/Los_Angeles' });
-  const entry = `\n**Voice note (${timeStr} PT)**\n\n${content}\n`;
+  const entry = `\n**Voice note (${timeStr} PT):** ${content}\n`;
 
   try {
     // Ensure daily folder exists
