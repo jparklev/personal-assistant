@@ -127,3 +127,21 @@ This is the Discord bot that routes messages to you. Key files:
 - Vault sync: runs every 5 minutes via systemd timer
 
 See `docs/DEPLOYMENT.md` for operations guide.
+
+### Deploying Local Changes to VPS
+
+After making code changes locally, sync to VPS:
+
+```bash
+# 1. Commit and push your changes
+git add . && git commit -m "your message" && git push
+
+# 2. Pull, build, and restart on VPS
+ssh assistant@143.198.101.198 "cd ~/personal-assistant && git pull && ~/.bun/bin/bunx tsc"
+ssh root@143.198.101.198 "systemctl restart personal-assistant"
+
+# 3. Verify
+ssh root@143.198.101.198 "journalctl -u personal-assistant -n 20"
+```
+
+The VPS tracks `jparklev/vps-provisioning` branch (will be `main` after merge).
