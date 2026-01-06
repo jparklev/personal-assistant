@@ -10,16 +10,16 @@
  *
  * Tasks:
  *   - morning-checkin: Send morning check-in to Discord
- *   - vault-sync: Sync vault and process new blips
- *   - process-clipper: Process clipper highlights
+ *   - weekly-reconsolidation: Weekly blips review
+ *   - periodic-nudge: Placeholder (not implemented)
  */
 
 import { join } from 'path';
 import { homedir } from 'os';
 import { existsSync, readFileSync } from 'fs';
+import { resolveVaultPath } from '../config';
 import type { SchedulerContext, TaskName, TaskResult } from './types';
 import { runMorningCheckin } from './tasks/morning-checkin';
-import { runVaultSync } from './tasks/vault-sync';
 import { runWeeklyReconsolidation } from './tasks/weekly-reconsolidation';
 
 // Load environment variables from .env if present
@@ -62,7 +62,8 @@ function buildContext(): SchedulerContext {
   const home = homedir();
 
   return {
-    vaultPath: process.env.OBSIDIAN_VAULT_PATH || join(home, 'Library/Mobile Documents/iCloud~md~Obsidian/Documents/Personal'),
+    // Vault sync is handled externally (e.g. a git pull/push script on a VPS).
+    vaultPath: resolveVaultPath(home),
     assistantDir: process.env.ASSISTANT_DIR || join(home, '.assistant'),
     discordToken: process.env.DISCORD_BOT_TOKEN || '',
     channels: loadChannels(),
@@ -72,9 +73,7 @@ function buildContext(): SchedulerContext {
 // Task registry
 const tasks: Record<TaskName, (ctx: SchedulerContext) => Promise<TaskResult>> = {
   'morning-checkin': runMorningCheckin,
-  'vault-sync': runVaultSync,
   'weekly-reconsolidation': runWeeklyReconsolidation,
-  'process-clipper': runVaultSync, // Uses same logic as vault-sync for now
   'periodic-nudge': async () => ({ success: true, message: 'Nudge not implemented yet' }),
 };
 
@@ -100,6 +99,11 @@ async function main() {
 
   if (!ctx.discordToken) {
     console.error('DISCORD_BOT_TOKEN not set');
+    process.exit(1);
+  }
+  if (!existsSync(ctx.vaultPath)) {
+    console.error(`Obsidian vault not found at: ${ctx.vaultPath}`);
+    console.error('Set OBSIDIAN_VAULT_PATH to your vault directory (recommended on VPS).');
     process.exit(1);
   }
 

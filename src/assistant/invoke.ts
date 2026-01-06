@@ -1,12 +1,10 @@
 import type { AppConfig } from '../config';
 import { loadConfig } from '../config';
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { formatCapturesForContext } from '../captures';
 import { getBlipsToSurface } from '../blips';
 import { invokeClaude } from './runner';
-import { parseFrontmatter, serializeFrontmatter } from '../utils/frontmatter';
-import { VaultWatcher } from '../vault/watcher';
 
 function safeRead(path: string, maxBytes: number): string {
   if (!existsSync(path)) return '';
@@ -111,28 +109,4 @@ export async function invokeClaudeCode(opts: InvokeOptions): Promise<InvokeResul
   } catch (e: any) {
     return { text: '', success: false, error: e?.message || String(e) };
   }
-}
-
-/**
- * Update last_vault_commit in memory.md after processing.
- */
-export function checkpointVaultCommit(): void {
-  const cfg = loadConfig();
-  const memoryPath = join(cfg.assistantDir, 'memory.md');
-  if (!existsSync(memoryPath)) return;
-
-  const watcher = new VaultWatcher(cfg.vaultPath);
-  if (!watcher.hasGit()) return;
-
-  const currentCommit = watcher.getCurrentCommit();
-  if (!currentCommit) return;
-
-  const raw = readFileSync(memoryPath, 'utf-8');
-  const { frontmatter, content } = parseFrontmatter<any>(raw);
-  const nextFrontmatter = {
-    ...frontmatter,
-    updated: new Date().toISOString().split('T')[0],
-    last_vault_commit: currentCommit,
-  };
-  writeFileSync(memoryPath, serializeFrontmatter(nextFrontmatter, content), 'utf-8');
 }

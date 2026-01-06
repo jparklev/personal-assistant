@@ -3,7 +3,6 @@ export type {
   Observation,
   UserPreference,
   StandingQuestion,
-  VaultSyncState,
   MorningCheckinState,
   ClipperState,
   /** @deprecated Use Observation instead */
@@ -36,9 +35,6 @@ export {
 
 // Convenience operations
 export {
-  // Vault sync
-  getLastVaultSync,
-  updateVaultSync,
   // Goals
   setGoals,
   getGoals,

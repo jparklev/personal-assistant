@@ -27,8 +27,7 @@ import {
 } from '../blips';
 import { extractUrls } from '../captures';
 import { captureUrlToFile } from '../captures/capture-url';
-import { VaultWatcher } from '../vault/watcher';
-import { getLastVaultSync, updateVaultSync, getDueQuestions, markQuestionAsked } from '../memory';
+import { getDueQuestions, markQuestionAsked } from '../memory';
 
 export interface AppContext {
   cfg: AppConfig;
@@ -1754,7 +1753,6 @@ async function handleAssistant(interaction: ChatInputCommandInteraction, ctx: Ap
       const categoryId = ctx.state.snapshot.assistant.categoryId;
       const managedCount = getManagedAssistantChannelIds(ctx.state).length;
       const blips = listBlips();
-      const vaultSync = getLastVaultSync();
 
       const channelLines = [
         channels.morningCheckin ? `  Morning: <#${channels.morningCheckin}>` : '  Morning: not set',
@@ -1782,50 +1780,10 @@ ${channelLines}
 **Vault:**
   Path: \`${vaultPath}\`
   Accessible: ${vaultExists ? '✅' : '❌'}
-  Last sync: ${vaultSync.at || 'never'}
 
 **Blips:**
   Total: ${blips.length}`,
         ephemeral: false,
-      });
-      break;
-    }
-
-    case 'sync': {
-      await interaction.deferReply();
-
-      const vaultPath = ctx.cfg.vaultPath;
-      const vaultWatcher = new VaultWatcher(vaultPath);
-
-      if (!existsSync(vaultPath)) {
-        await interaction.editReply({ content: `❌ Vault not found at \`${vaultPath}\`` });
-        return;
-      }
-
-      const currentCommit = vaultWatcher.getCurrentCommit();
-      const lastSync = getLastVaultSync();
-
-      let changes: { type: string; path: string }[] = [];
-      if (lastSync.hash && currentCommit) {
-        changes = vaultWatcher.getChangesSince(lastSync.hash);
-      }
-
-      if (currentCommit) {
-        updateVaultSync(currentCommit);
-      }
-
-      const changesSummary = changes.length > 0
-        ? changes.slice(0, 5).map((c) => `  ${c.type}: ${c.path}`).join('\n') +
-          (changes.length > 5 ? `\n  ...and ${changes.length - 5} more` : '')
-        : '  (no changes)';
-
-      await interaction.editReply({
-        content: `**Vault Sync Complete**
-
-📁 **Files changed since last sync:** ${changes.length}
-${changesSummary}
-
-🔖 **Commit:** \`${currentCommit?.slice(0, 7) || 'none'}\``,
       });
       break;
     }

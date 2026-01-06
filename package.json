@@ -11,7 +11,6 @@
     "deploy:commands": "bun run src/discord/deploy-commands.ts",
     "task:morning": "bun run src/scheduler/runner.ts morning-checkin",
     "task:weekly": "bun run src/scheduler/runner.ts weekly-reconsolidation",
-    "task:sync": "bun run src/scheduler/runner.ts vault-sync",
     "blips:cleanup": "bun run src/tools/blips-cleanup.ts"
   },
   "dependencies": {

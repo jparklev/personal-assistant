@@ -16,7 +16,6 @@
  *     patterns.md               # Observed patterns
  *     corrections.md            # Corrections log
  *   state/                      # Operational state (JSON for programmatic access)
- *     vault-sync.json
  *     scheduled-tasks.json
  *     questions.json
  *   logs/                       # Interaction logs by date
@@ -500,12 +499,12 @@ Record of corrections to avoid repeating mistakes.
   if (!existsSync(memoryPath)) {
     writeFileSync(memoryPath, `---
 updated: ${new Date().toISOString().split('T')[0]}
-last_vault_commit: null
 ---
 
 ## Pointers
 
-Obsidian vault: \`/Users/joshlevine/Library/Mobile Documents/iCloud~md~Obsidian/Documents/Personal\`
+Obsidian vault: Set via \`OBSIDIAN_VAULT_PATH\` env var (default: \`~/obsidian-vaults/personal\`)
+VPS: vault sync is external (git pull/push); the assistant reads the working tree directly.
 
 - Goals: \`2026 Goals.md\`
 - Daily notes: \`Daily/YYYY-MM-DD.md\`

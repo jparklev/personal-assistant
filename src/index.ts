@@ -1,4 +1,5 @@
 import { Events } from 'discord.js';
+import { existsSync } from 'fs';
 import { loadConfig } from './config';
 import { defaultState, StateStore } from './state';
 import { logJson } from './log';
@@ -16,6 +17,16 @@ async function main() {
   }
   if (!cfg.discordAppId) {
     throw new Error('DISCORD_APP_ID not set. Add it to your .env file.');
+  }
+  if (!existsSync(cfg.vaultPath)) {
+    throw new Error(
+      [
+        `Obsidian vault not found at: ${cfg.vaultPath}`,
+        '',
+        'Set OBSIDIAN_VAULT_PATH to your vault directory (recommended on VPS).',
+        'Example: OBSIDIAN_VAULT_PATH=~/obsidian-vaults/personal',
+      ].join('\n')
+    );
   }
 
   console.log('Starting Personal Assistant...');

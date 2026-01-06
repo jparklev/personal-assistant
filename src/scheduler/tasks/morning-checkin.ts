@@ -2,9 +2,8 @@ import { Client, GatewayIntentBits, TextChannel } from 'discord.js';
 import type { SchedulerContext, TaskResult } from '../types';
 import { getBlipsToSurface, readBlip, touchBlip, type BlipSummary } from '../../blips';
 import { getDueQuestions, markQuestionAsked, updateMorningCheckin } from '../../memory';
-import { invokeClaudeCode, buildAssistantContext, checkpointVaultCommit } from '../../assistant/invoke';
+import { invokeClaudeCode, buildAssistantContext } from '../../assistant/invoke';
 import { getTodayReminders } from '../../integrations/reminders';
-import { VaultWatcher } from '../../vault/watcher';
 
 export async function runMorningCheckin(ctx: SchedulerContext): Promise<TaskResult> {
   if (!ctx.channels.morningCheckin) {
@@ -19,10 +18,6 @@ export async function runMorningCheckin(ctx: SchedulerContext): Promise<TaskResu
   }).filter((b) => b.blip !== null);
   const dueQuestions = getDueQuestions();
   const reminders = getTodayReminders();
-
-  // Check for vault changes
-  const watcher = new VaultWatcher(ctx.vaultPath);
-  const vaultChanges = watcher.getChangesToday();
 
   const today = new Date();
   const yesterday = new Date(Date.now() - 86400000);
@@ -50,23 +45,18 @@ ${buildAssistantContext()}
     ? reminders.map(r => `"${r.name}" (${r.list})`).join(', ')
     : '(none)'}
 
-3. **Vault changes today**: ${vaultChanges.length > 0
-    ? vaultChanges.slice(0, 5).map((c) => c.path).join(', ') + (vaultChanges.length > 5 ? '...' : '')
-    : '(none)'}
-
-4. **Blips to surface**:
+3. **Blips to surface**:
 ${blipsToSurface.length > 0
   ? blipsToSurface.map((r) => `   - ${r.blip!.title}: ${r.blip!.content.slice(0, 100)}... (${r.reason})`).join('\n')
   : '   (none ready)'}
 
-5. **Standing question**: ${dueQuestions[0]?.question || '(none due today)'}
+4. **Standing question**: ${dueQuestions[0]?.question || '(none due today)'}
 
 ## Message Guidelines
 
 - Greet warmly but concisely ("Good morning!" not "Good morning, Josh!")
 - Mention reminders if any are due today
 - If there are incomplete followups from yesterday, ask about them (accountable partner mode)
-- If vault changed (e.g., goals updated), acknowledge and ask about it
 - If there are blips to surface, pick ONE and ask a thought-provoking question about it
 - End with the standing question if there is one
 
@@ -85,7 +75,6 @@ Output ONLY the message to send, nothing else.`;
     blipsToSurface,
     dueQuestions,
     remindersCount: reminders.length,
-    vaultChangesCount: vaultChanges.length,
   };
 
   if (!result.success) {
@@ -101,7 +90,6 @@ interface MorningContext {
   blipsToSurface: { summary: BlipSummary }[];
   dueQuestions: { id: string }[];
   remindersCount: number;
-  vaultChangesCount: number;
 }
 
 async function sendMessage(
@@ -142,15 +130,11 @@ async function sendMessage(
     // Update state
     updateMorningCheckin(channel.id);
 
-    // Checkpoint vault commit so next time we see only new changes
-    checkpointVaultCommit();
-
     return {
       success: true,
       message: `Morning check-in sent to ${channel.name}`,
       data: {
         remindersCount: morning.remindersCount,
-        vaultChangesCount: morning.vaultChangesCount,
         blipsCount: morning.blipsToSurface.length,
         questionAsked: morning.dueQuestions[0]?.id,
         usedClaudeCode: true,
@@ -164,18 +148,12 @@ async function sendMessage(
 }
 
 // For testing - generate without sending
-export async function generateMorningCheckinContent(vaultPath?: string): Promise<{
+export async function generateMorningCheckinContent(): Promise<{
   message: string;
   blipsToSurface: { title: string; content: string; reason: string }[];
   remindersCount: number;
-  vaultChangesCount: number;
   dueQuestion?: { id: string; question: string };
 }> {
-  const { homedir } = require('os');
-  const { join } = require('path');
-  const defaultVaultPath = process.env.OBSIDIAN_VAULT_PATH?.trim() ||
-    join(homedir(), 'Library/Mobile Documents/iCloud~md~Obsidian/Documents/Personal');
-
   const blipSummaries = getBlipsToSurface(3);
   const blipsToSurface = blipSummaries.map((summary) => {
     const blip = readBlip(summary.path);
@@ -183,9 +161,6 @@ export async function generateMorningCheckinContent(vaultPath?: string): Promise
   }).filter((b) => b.blip !== null);
   const dueQuestions = getDueQuestions();
   const reminders = getTodayReminders();
-
-  const watcher = new VaultWatcher(vaultPath || defaultVaultPath);
-  const vaultChanges = watcher.getChangesToday();
 
   const today = new Date();
   const yesterday = new Date(Date.now() - 86400000);
@@ -212,23 +187,18 @@ ${buildAssistantContext()}
     ? reminders.map(r => `"${r.name}" (${r.list})`).join(', ')
     : '(none)'}
 
-3. **Vault changes today**: ${vaultChanges.length > 0
-    ? vaultChanges.slice(0, 5).map((c) => c.path).join(', ')
-    : '(none)'}
-
-4. **Blips to surface**:
+3. **Blips to surface**:
 ${blipsToSurface.length > 0
   ? blipsToSurface.map((r) => `   - ${r.blip!.title}: ${r.blip!.content.slice(0, 100)}... (${r.reason})`).join('\n')
   : '   (none ready)'}
 
-5. **Standing question**: ${dueQuestions[0]?.question || '(none due today)'}
+4. **Standing question**: ${dueQuestions[0]?.question || '(none due today)'}
 
 ## Message Guidelines
 
 - Greet warmly but concisely
 - Mention reminders if any are due today
 - If there are incomplete followups from yesterday, ask about them
-- If vault changed, acknowledge and ask about it
 - If there are blips to surface, pick ONE and ask about it
 - End with the standing question if there is one
 
@@ -252,7 +222,6 @@ Output ONLY the message, nothing else.`;
       reason: r.reason,
     })),
     remindersCount: reminders.length,
-    vaultChangesCount: vaultChanges.length,
     dueQuestion: dueQuestions[0] ? { id: dueQuestions[0].id, question: dueQuestions[0].question } : undefined,
   };
 }

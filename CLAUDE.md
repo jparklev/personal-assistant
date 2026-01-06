@@ -78,7 +78,8 @@ As you work, update your memory:
 ## Blips
 
 Blips are small noticings and ideas captured for later development. They live in the **Obsidian vault**:
-- Location: `~/Library/Mobile Documents/iCloud~md~obsidian/Documents/Personal/Blips/`
+- Location: `$OBSIDIAN_VAULT_PATH/Blips/` (default: `~/obsidian-vaults/personal/Blips/`)
+- On VPS: set `OBSIDIAN_VAULT_PATH` to the git-cloned vault; syncing is handled externally.
 - Format: `YYYY-MM-DD-slug.md` with YAML frontmatter
 - Statuses: `active`, `snoozed`, `archived`, `bumped`
 
