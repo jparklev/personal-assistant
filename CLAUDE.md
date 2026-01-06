@@ -118,3 +118,12 @@ This is the Discord bot that routes messages to you. Key files:
 - `src/blips/` - blip storage and surfacing
 - `src/memory/` - the ~/.assistant/ file system
 - `src/discord/` - Discord bot handlers
+
+## Deployment Status
+
+**Currently running on VPS:**
+- Droplet: `personal-assistant` @ `143.198.101.198` (DigitalOcean sfo3)
+- Service: `systemctl status personal-assistant`
+- Vault sync: runs every 5 minutes via systemd timer
+
+See `docs/DEPLOYMENT.md` for operations guide.

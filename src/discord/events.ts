@@ -28,6 +28,7 @@ import {
 import { extractUrls } from '../captures';
 import { captureUrlToFile } from '../captures/capture-url';
 import { getDueQuestions, markQuestionAsked } from '../memory';
+import { getVoiceAttachments, transcribeMessageVoice, getTranscriptionMethod } from './voice';
 
 export interface AppContext {
   cfg: AppConfig;
@@ -937,7 +938,27 @@ async function maybeStartSessionWorker(sessionId: string, ctx: AppContext): Prom
 }
 
 async function handleAssistantMessage(message: Message, ctx: AppContext): Promise<void> {
-  const text = message.content.trim();
+  let text = message.content.trim();
+
+  // Check for voice message attachments and transcribe them
+  const voiceAttachments = getVoiceAttachments(message);
+  if (voiceAttachments.length > 0) {
+    const { transcripts, errors } = await transcribeMessageVoice(message);
+
+    if (transcripts.length > 0) {
+      // Prepend transcripts to the text content
+      const voiceText = transcripts.map((t, i) =>
+        voiceAttachments.length > 1 ? `[Voice message ${i + 1}]: ${t}` : `[Voice message]: ${t}`
+      ).join('\n\n');
+
+      text = text ? `${voiceText}\n\n${text}` : voiceText;
+    } else if (errors.length > 0 && !text) {
+      // Only voice message(s) but transcription failed
+      await message.reply(`Couldn't transcribe voice message: ${errors[0]}`);
+      return;
+    }
+  }
+
   if (!text) return;
 
   const assistantChannels = ctx.state.snapshot.assistant.channels;
@@ -1327,7 +1348,25 @@ Keep responses concise.`;
 // ============== Blip Capture Handler ==============
 
 async function handleBlipCapture(message: Message, ctx: AppContext): Promise<void> {
-  const text = message.content.trim();
+  let text = message.content.trim();
+
+  // Check for voice message attachments and transcribe them
+  const voiceAttachments = getVoiceAttachments(message);
+  if (voiceAttachments.length > 0) {
+    const { transcripts, errors } = await transcribeMessageVoice(message);
+
+    if (transcripts.length > 0) {
+      const voiceText = transcripts.map((t, i) =>
+        voiceAttachments.length > 1 ? `[Voice message ${i + 1}]: ${t}` : `[Voice message]: ${t}`
+      ).join('\n\n');
+
+      text = text ? `${voiceText}\n\n${text}` : voiceText;
+    } else if (errors.length > 0 && !text) {
+      await message.reply(`Couldn't transcribe voice message: ${errors[0]}`);
+      return;
+    }
+  }
+
   if (!text) return;
 
   // PRIORITY: If this is a reply to a bot message, route to assistant handler
