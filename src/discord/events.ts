@@ -1,6 +1,8 @@
 import type { Client, ChatInputCommandInteraction, Message } from 'discord.js';
 import { ChannelType, Events } from 'discord.js';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { execSync } from 'child_process';
+import { dirname } from 'path';
 import { join } from 'path';
 import type { DiscordTransport } from './transport';
 import type { AppConfig } from '../config';
@@ -263,6 +265,17 @@ export function registerEventHandlers(client: Client, ctx: AppContext) {
     // Blips channel - natural language capture (text and/or URLs)
     if (message.channelId === assistantChannels.blips && ctx.state.isAssistantEnabled()) {
       await handleBlipCapture(message, ctx);
+      return;
+    }
+
+    // Meditation logs channel - voice messages appended to daily notes
+    const isMeditationLogsChannel =
+      assistantChannels.meditationLogs
+        ? message.channelId === assistantChannels.meditationLogs
+        : (message.channel as any)?.name === 'meditation-logs';
+
+    if (isMeditationLogsChannel && ctx.state.isAssistantEnabled()) {
+      await handleMeditationLog(message, ctx);
       return;
     }
 
@@ -1538,6 +1551,78 @@ async function handleBlipCapture(message: Message, ctx: AppContext): Promise<voi
     await progressMsg.edit(response.slice(0, 2000));
   } catch (error: any) {
     await progressMsg.edit(`Error: ${error?.message || 'Unknown error'}`);
+  }
+}
+
+// ============== Meditation Log Handler ==============
+
+async function handleMeditationLog(message: Message, ctx: AppContext): Promise<void> {
+  // Only handle voice messages
+  const voiceAttachments = getVoiceAttachments(message);
+  if (voiceAttachments.length === 0) {
+    // Text messages can be handled too - just append them directly
+    const text = message.content.trim();
+    if (!text) return;
+
+    await appendMeditationEntry(text, message, ctx);
+    return;
+  }
+
+  // Transcribe voice message(s)
+  const { transcripts, errors } = await transcribeMessageVoice(message);
+
+  if (transcripts.length === 0) {
+    if (errors.length > 0) {
+      await message.reply(`Couldn't transcribe voice message: ${errors[0]}`);
+    }
+    return;
+  }
+
+  // Combine all transcripts
+  const fullTranscript = transcripts.join('\n\n');
+  await appendMeditationEntry(fullTranscript, message, ctx);
+}
+
+async function appendMeditationEntry(content: string, message: Message, ctx: AppContext): Promise<void> {
+  const vaultPath = ctx.cfg.vaultPath;
+
+  // Get today's date in YYYY-MM-DD format
+  const today = new Date().toISOString().split('T')[0];
+  const dailyNotePath = join(vaultPath, 'daily', `${today}.md`);
+
+  // Format the entry with timestamp
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  const entry = `\n## Meditation (${timeStr})\n\n${content}\n`;
+
+  try {
+    // Ensure daily folder exists
+    mkdirSync(dirname(dailyNotePath), { recursive: true });
+
+    // Append to daily note
+    appendFileSync(dailyNotePath, entry, 'utf-8');
+
+    // Git commit the change
+    try {
+      execSync(`git add -A && git commit -m "meditation log: ${today}"`, {
+        cwd: vaultPath,
+        timeout: 10000,
+        stdio: 'pipe',
+      });
+    } catch (gitErr: any) {
+      // Commit might fail if nothing to commit (already committed) - that's ok
+      if (!gitErr.message?.includes('nothing to commit')) {
+        console.error('[MeditationLog] Git commit failed:', gitErr.message);
+      }
+    }
+
+    // React with thumbs up and reply with word count
+    const wordCount = content.split(/\s+/).filter(Boolean).length;
+    await message.react('👍');
+    await message.reply(`Logged ${wordCount} words to \`daily/${today}.md\``);
+  } catch (err: any) {
+    console.error('[MeditationLog] Failed to append:', err);
+    await message.reply(`Failed to log meditation: ${err.message}`);
   }
 }
 

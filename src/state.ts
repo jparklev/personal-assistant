@@ -10,6 +10,7 @@ export interface AssistantStateConfig {
     blips?: string; // Unified channel for blips + captures
     blipsStream?: string;
     lobby?: string;
+    meditationLogs?: string; // Voice logs appended to daily notes
   };
 }
 
@@ -70,7 +71,7 @@ export class StateStore {
 
   // Assistant channel management
   setAssistantChannel(
-    type: 'morningCheckin' | 'blips' | 'blipsStream' | 'lobby',
+    type: 'morningCheckin' | 'blips' | 'blipsStream' | 'lobby' | 'meditationLogs',
     channelId: string | undefined
   ): void {
     if (!channelId) {
@@ -80,7 +81,7 @@ export class StateStore {
     }
   }
 
-  getAssistantChannel(type: 'morningCheckin' | 'blips' | 'blipsStream' | 'lobby'): string | undefined {
+  getAssistantChannel(type: 'morningCheckin' | 'blips' | 'blipsStream' | 'lobby' | 'meditationLogs'): string | undefined {
     return this.state.assistant.channels[type];
   }
 
@@ -129,6 +130,7 @@ export class StateStore {
       if (typeof rawChannels.blips === 'string') channels.blips = rawChannels.blips;
       if (typeof rawChannels.blipsStream === 'string') channels.blipsStream = rawChannels.blipsStream;
       if (typeof rawChannels.lobby === 'string') channels.lobby = rawChannels.lobby;
+      if (typeof rawChannels.meditationLogs === 'string') channels.meditationLogs = rawChannels.meditationLogs;
 
       return {
         version: 1,
