@@ -1602,11 +1602,11 @@ async function appendMeditationEntry(content: string, message: Message, ctx: App
     // Append to daily note
     appendFileSync(dailyNotePath, entry, 'utf-8');
 
-    // Git commit the change
+    // Git commit and push the change
     try {
-      execSync(`git add -A && git commit -m "meditation log: ${today}"`, {
+      execSync(`git add -A && git commit -m "meditation log: ${today}" && git push`, {
         cwd: vaultPath,
-        timeout: 10000,
+        timeout: 30000,
         stdio: 'pipe',
       });
     } catch (gitErr: any) {
