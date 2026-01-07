@@ -58,6 +58,56 @@ export class SchedulerState {
     this.state = this.loadFromDisk();
   }
 
+  private dateStringInTimeZone(date: Date, timeZone: string): string {
+    try {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(date);
+
+      const year = parts.find((p) => p.type === 'year')?.value;
+      const month = parts.find((p) => p.type === 'month')?.value;
+      const day = parts.find((p) => p.type === 'day')?.value;
+
+      if (year && month && day) return `${year}-${month}-${day}`;
+    } catch {
+      // ignore
+    }
+    return date.toISOString().split('T')[0];
+  }
+
+  private timeMinutesInTimeZone(date: Date, timeZone: string): number {
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).formatToParts(date);
+
+      const hour = parts.find((p) => p.type === 'hour')?.value;
+      const minute = parts.find((p) => p.type === 'minute')?.value;
+
+      if (hour != null && minute != null) return Number(hour) * 60 + Number(minute);
+    } catch {
+      // ignore
+    }
+    return date.getUTCHours() * 60 + date.getUTCMinutes();
+  }
+
+  private dayOfWeekInTimeZone(date: Date, timeZone: string): number {
+    try {
+      const short = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(date);
+      const idx = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(short);
+      if (idx !== -1) return idx;
+    } catch {
+      // ignore
+    }
+    return date.getUTCDay();
+  }
+
   get snapshot(): ScheduleState {
     return this.state;
   }
@@ -77,8 +127,9 @@ export class SchedulerState {
    * Mark a task as having run today.
    */
   markRun(task: keyof Omit<ScheduleState, 'version'>): void {
-    const today = new Date().toISOString().split('T')[0];
-    this.state[task].lastRun = today;
+    const now = new Date();
+    const tz = this.state[task].timezone;
+    this.state[task].lastRun = this.dateStringInTimeZone(now, tz);
     this.saveToDisk();
   }
 
@@ -94,21 +145,19 @@ export class SchedulerState {
     if (!config.enabled) return false;
 
     const now = new Date();
-    const today = now.toISOString().split('T')[0];
+    const todayInTz = this.dateStringInTimeZone(now, config.timezone);
 
     // Already ran today
-    if (config.lastRun === today) return false;
+    if (config.lastRun === todayInTz) return false;
 
-    // Check if current time is past scheduled time
+    // Check if current time is past scheduled time (in task's timezone)
     const [hours, minutes] = config.time.split(':').map(Number);
-    const scheduledTime = new Date(now);
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return false;
 
-    // Convert to task's timezone
-    const nowInTz = new Date(now.toLocaleString('en-US', { timeZone: config.timezone }));
-    const scheduledInTz = new Date(nowInTz);
-    scheduledInTz.setHours(hours, minutes, 0, 0);
+    const nowMinutes = this.timeMinutesInTimeZone(now, config.timezone);
+    const scheduledMinutes = hours * 60 + minutes;
 
-    return nowInTz >= scheduledInTz;
+    return nowMinutes >= scheduledMinutes;
   }
 
   /**
@@ -119,21 +168,22 @@ export class SchedulerState {
     if (!config.enabled) return false;
 
     const now = new Date();
-    const today = now.toISOString().split('T')[0];
+    const todayInTz = this.dateStringInTimeZone(now, config.timezone);
 
     // Already ran today
-    if (config.lastRun === today) return false;
+    if (config.lastRun === todayInTz) return false;
 
     // Check if it's the right day of week
-    const nowInTz = new Date(now.toLocaleString('en-US', { timeZone: config.timezone }));
-    if (nowInTz.getDay() !== config.dayOfWeek) return false;
+    if (this.dayOfWeekInTimeZone(now, config.timezone) !== config.dayOfWeek) return false;
 
     // Check if current time is past scheduled time
     const [hours, minutes] = config.time.split(':').map(Number);
-    const scheduledInTz = new Date(nowInTz);
-    scheduledInTz.setHours(hours, minutes, 0, 0);
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return false;
 
-    return nowInTz >= scheduledInTz;
+    const nowMinutes = this.timeMinutesInTimeZone(now, config.timezone);
+    const scheduledMinutes = hours * 60 + minutes;
+
+    return nowMinutes >= scheduledMinutes;
   }
 
   /**

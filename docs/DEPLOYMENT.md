@@ -38,6 +38,10 @@ ssh assistant@143.198.101.198 /home/assistant/bin/vault-sync.sh
 - Bot repo: `/home/assistant/personal-assistant`
 - Vault repo: `/home/assistant/obsidian-vaults/personal`
 - Runtime state: `/home/assistant/.assistant`
+  - `state.json` - Discord channel IDs, managed channels, assistant enabled state
+  - `scheduler.json` - Schedule configuration (morning/evening check-in times, weekly reconsolidation)
+  - `flashcards.json` - Spaced repetition flashcard deck
+  - `channels/<id>/memory.md` - Per-channel memory files for managed channels
 
 ## Prereqs
 

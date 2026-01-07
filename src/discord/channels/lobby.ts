@@ -323,10 +323,24 @@ export const lobbyHandler: ChannelHandler = {
   name: 'lobby',
 
   matches: (matchCtx) => {
-    const { channelId, channelName, ctx } = matchCtx;
+    const { channelId, channelName, message, ctx } = matchCtx;
     const lobbyId = ctx.state.snapshot.assistant.channels.lobby;
-    if (lobbyId) return channelId === lobbyId;
-    return channelName?.toLowerCase() === 'assistant';
+    const isLobby = lobbyId ? channelId === lobbyId : channelName?.toLowerCase() === 'assistant';
+    if (!isLobby) return false;
+
+    // Replies to bot proposals/questions are part of the lobby control-plane.
+    const repliedToId = message.reference?.messageId;
+    if (repliedToId) {
+      if (pendingCreateWizardsByQuestionMessageId.has(repliedToId)) return true;
+      if (pendingLobbyActionsByProposalMessageId.has(repliedToId)) return true;
+    }
+
+    const text = message.content.trim();
+    if (parseCreateChannelRequest(text)) return true;
+    if (parseDeleteChannelRequest(text)) return true;
+
+    // Everything else is treated as normal assistant chat in events.ts.
+    return false;
   },
 
   handle: handleLobbyMessage,
@@ -377,9 +391,6 @@ async function handleLobbyMessage(message: Message, ctx: AppContext): Promise<vo
     await proposeDeleteChannel(message, ctx, delReq.channelId);
     return;
   }
-
-  // Not a control-plane message; return false to let it fall through to assistant handler
-  // The events router will handle this
 }
 
 async function handleWizardReply(

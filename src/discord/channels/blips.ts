@@ -37,8 +37,20 @@ export const blipsHandler: ChannelHandler = {
   name: 'blips',
 
   matches: (matchCtx) => {
-    const { channelId, ctx } = matchCtx;
-    return channelId === ctx.state.snapshot.assistant.channels.blips;
+    const { channelId, ctx, message } = matchCtx;
+    if (channelId !== ctx.state.snapshot.assistant.channels.blips) return false;
+
+    // Voice messages should always be handled here (transcribe + capture/discuss).
+    if (getVoiceAttachments(message).length > 0) return true;
+
+    const text = message.content.trim();
+    if (!text) return false;
+
+    // URLs should always be handled here (auto-capture), even if the text starts with a "command" word.
+    if (extractUrls(text).length > 0) return true;
+
+    // Command-like text (no URLs) should fall through to the assistant handler.
+    return !isBlipCommand(text);
   },
 
   handle: handleBlipCapture,
@@ -74,9 +86,7 @@ async function handleBlipCapture(message: Message, ctx: AppContext): Promise<voi
 
   const urls = extractUrls(text);
   const hasUrls = urls.length > 0;
-  const looksLikeCommand = /^(what|list|show|surface|add|snooze|archive|save|tell|help|can you)/i.test(
-    text
-  );
+  const looksLikeCommand = isBlipCommand(text);
 
   // Plain text without URLs: discuss first, then offer to save
   if (!hasUrls && !looksLikeCommand) {
@@ -86,7 +96,7 @@ async function handleBlipCapture(message: Message, ctx: AppContext): Promise<voi
 
   // Commands without URLs: route to assistant (handled externally)
   if (!hasUrls && looksLikeCommand) {
-    // Return without handling - will fall through to assistant handler
+    // This case is excluded by matches(); keep for defensive clarity.
     return;
   }
 

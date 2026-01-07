@@ -55,9 +55,13 @@ async function runSchedulerTick(ctx: SchedulerContext): Promise<void> {
   if (scheduler.isDailyTaskDue('morningCheckin')) {
     console.log('[Scheduler] Morning check-in is due');
     try {
-      await runMorningCheckin(ctx);
-      scheduler.markRun('morningCheckin');
-      console.log('[Scheduler] Morning check-in completed');
+      const didSend = await runMorningCheckin(ctx);
+      if (didSend) {
+        scheduler.markRun('morningCheckin');
+        console.log('[Scheduler] Morning check-in completed');
+      } else {
+        console.log('[Scheduler] Morning check-in skipped (not sent)');
+      }
     } catch (err) {
       console.error('[Scheduler] Morning check-in failed:', err);
     }
@@ -67,9 +71,13 @@ async function runSchedulerTick(ctx: SchedulerContext): Promise<void> {
   if (scheduler.isDailyTaskDue('eveningCheckin')) {
     console.log('[Scheduler] Evening check-in is due');
     try {
-      await runEveningCheckin(ctx);
-      scheduler.markRun('eveningCheckin');
-      console.log('[Scheduler] Evening check-in completed');
+      const didSend = await runEveningCheckin(ctx);
+      if (didSend) {
+        scheduler.markRun('eveningCheckin');
+        console.log('[Scheduler] Evening check-in completed');
+      } else {
+        console.log('[Scheduler] Evening check-in skipped (not sent)');
+      }
     } catch (err) {
       console.error('[Scheduler] Evening check-in failed:', err);
     }
@@ -79,9 +87,13 @@ async function runSchedulerTick(ctx: SchedulerContext): Promise<void> {
   if (scheduler.isWeeklyTaskDue()) {
     console.log('[Scheduler] Weekly reconsolidation is due');
     try {
-      await runWeeklyReconsolidation(ctx);
-      scheduler.markRun('weeklyReconsolidation');
-      console.log('[Scheduler] Weekly reconsolidation completed');
+      const didSend = await runWeeklyReconsolidation(ctx);
+      if (didSend) {
+        scheduler.markRun('weeklyReconsolidation');
+        console.log('[Scheduler] Weekly reconsolidation completed');
+      } else {
+        console.log('[Scheduler] Weekly reconsolidation skipped (not sent)');
+      }
     } catch (err) {
       console.error('[Scheduler] Weekly reconsolidation failed:', err);
     }
@@ -91,17 +103,17 @@ async function runSchedulerTick(ctx: SchedulerContext): Promise<void> {
 /**
  * Morning check-in task.
  */
-async function runMorningCheckin(ctx: SchedulerContext): Promise<void> {
+async function runMorningCheckin(ctx: SchedulerContext): Promise<boolean> {
   const channelId = ctx.state.snapshot.assistant.channels.morningCheckin;
   if (!channelId) {
     console.log('[Scheduler] Morning check-in channel not configured');
-    return;
+    return false;
   }
 
   const channel = await ctx.client.channels.fetch(channelId);
   if (!channel || !('send' in channel)) {
     console.error('[Scheduler] Could not fetch morning check-in channel');
-    return;
+    return false;
   }
 
   // Gather context
@@ -161,17 +173,22 @@ ${
 - If there are blips to surface, pick ONE and ask a thought-provoking question about it
 - End with the standing question if there is one
 
-Remember: encourage thinking, don't just list things. Be concise. No emojis.
-Feel like a thoughtful partner checking in, not a bot generating a report.
+  Remember: encourage thinking, don't just list things. Be concise. No emojis.
+  Feel like a thoughtful partner checking in, not a bot generating a report.
 
-Output ONLY the message to send, nothing else.`;
+  Output ONLY the message to send, nothing else.`;
+
+  const fallback = `**Good morning!** Here's your check-in for ${dateStr}.\n\nWhat's your main focus for today?`;
+  let message = fallback;
 
   try {
     const result = await invokeClaude(prompt, { model: 'haiku' });
-    const message = result.ok && result.text
-      ? result.text
-      : `**Good morning!** Here's your check-in for ${dateStr}.\n\nWhat's your main focus for today?`;
+    if (result.ok && result.text) message = result.text;
+  } catch (err) {
+    console.error('[Scheduler] Failed to generate morning check-in:', err);
+  }
 
+  try {
     await (channel as TextChannel).send(message.slice(0, 2000));
 
     // Mark blips as surfaced
@@ -181,28 +198,28 @@ Output ONLY the message to send, nothing else.`;
     if (dueQuestions[0]) {
       markQuestionAsked(dueQuestions[0].id);
     }
+
+    return true;
   } catch (err) {
-    console.error('[Scheduler] Failed to generate morning check-in:', err);
-    await (channel as TextChannel).send(
-      `**Good morning!** Here's your check-in for ${dateStr}.\n\nWhat's your main focus for today?`
-    );
+    console.error('[Scheduler] Failed to send morning check-in:', err);
+    return false;
   }
 }
 
 /**
  * Evening check-in task.
  */
-async function runEveningCheckin(ctx: SchedulerContext): Promise<void> {
+async function runEveningCheckin(ctx: SchedulerContext): Promise<boolean> {
   const channelId = ctx.state.snapshot.assistant.channels.morningCheckin; // Use same channel
   if (!channelId) {
     console.log('[Scheduler] Evening check-in channel not configured');
-    return;
+    return false;
   }
 
   const channel = await ctx.client.channels.fetch(channelId);
   if (!channel || !('send' in channel)) {
     console.error('[Scheduler] Could not fetch evening check-in channel');
-    return;
+    return false;
   }
 
   const today = new Date();
@@ -237,37 +254,41 @@ Look for:
 
 Be brief. This is a wind-down, not a debrief. No emojis.
 
-Output ONLY the message to send, nothing else.`;
+  Output ONLY the message to send, nothing else.`;
+
+  const fallback = `**Good evening!** How did today go?\n\nAnything worth capturing before you wind down?`;
+  let message = fallback;
 
   try {
     const result = await invokeClaude(prompt, { model: 'haiku' });
-    const message = result.ok && result.text
-      ? result.text
-      : `**Good evening!** How did today go?\n\nAnything worth capturing before you wind down?`;
-
-    await (channel as TextChannel).send(message.slice(0, 2000));
+    if (result.ok && result.text) message = result.text;
   } catch (err) {
     console.error('[Scheduler] Failed to generate evening check-in:', err);
-    await (channel as TextChannel).send(
-      `**Good evening!** How did today go?\n\nAnything worth capturing before you wind down?`
-    );
+  }
+
+  try {
+    await (channel as TextChannel).send(message.slice(0, 2000));
+    return true;
+  } catch (err) {
+    console.error('[Scheduler] Failed to send evening check-in:', err);
+    return false;
   }
 }
 
 /**
  * Weekly reconsolidation task.
  */
-async function runWeeklyReconsolidation(ctx: SchedulerContext): Promise<void> {
+async function runWeeklyReconsolidation(ctx: SchedulerContext): Promise<boolean> {
   const channelId = ctx.state.snapshot.assistant.channels.morningCheckin;
   if (!channelId) {
     console.log('[Scheduler] Weekly reconsolidation channel not configured');
-    return;
+    return false;
   }
 
   const channel = await ctx.client.channels.fetch(channelId);
   if (!channel || !('send' in channel)) {
     console.error('[Scheduler] Could not fetch channel for weekly reconsolidation');
-    return;
+    return false;
   }
 
   const today = new Date();
@@ -300,19 +321,24 @@ ${buildAssistantContext()}
 
 This is a gentle weekly reflection, not a performance review. Be direct but kind. No emojis.
 
-Output ONLY the message to send, nothing else.`;
+  Output ONLY the message to send, nothing else.`;
+
+  const fallback =
+    `**Weekly check-in**\n\nLet's take a moment to reflect on the past week. What patterns did you notice? What do you want to carry forward?`;
+  let message = fallback;
 
   try {
     const result = await invokeClaude(prompt, { model: 'sonnet' }); // Use sonnet for deeper analysis
-    const message = result.ok && result.text
-      ? result.text
-      : `**Weekly check-in**\n\nLet's take a moment to reflect on the past week. What patterns did you notice? What do you want to carry forward?`;
-
-    await (channel as TextChannel).send(message.slice(0, 2000));
+    if (result.ok && result.text) message = result.text;
   } catch (err) {
     console.error('[Scheduler] Failed to generate weekly reconsolidation:', err);
-    await (channel as TextChannel).send(
-      `**Weekly check-in**\n\nLet's take a moment to reflect on the past week. What patterns did you notice? What do you want to carry forward?`
-    );
+  }
+
+  try {
+    await (channel as TextChannel).send(message.slice(0, 2000));
+    return true;
+  } catch (err) {
+    console.error('[Scheduler] Failed to send weekly reconsolidation:', err);
+    return false;
   }
 }

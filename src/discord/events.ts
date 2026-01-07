@@ -205,7 +205,17 @@ export function registerEventHandlers(client: Client, ctx: AppContext) {
     // Priority 2: Route to channel-specific handlers
     const handled = await routeToChannelHandler(message, ctx);
 
-    // If blips handler returned without handling (command case), route to assistant
+    // Priority 2.5: Lobby acts as a normal assistant channel when not a control-plane message.
+    const isLobbyChannel = assistantChannels.lobby
+      ? message.channelId === assistantChannels.lobby
+      : (message.channel as any)?.name === 'assistant';
+
+    if (!handled && isLobbyChannel) {
+      await handleAssistantMessage(message, ctx);
+      return;
+    }
+
+    // If this is a blips-channel command (no URL), route to assistant
     if (!handled) {
       // Check if it's a blips channel command
       const isBlipsChannel = message.channelId === assistantChannels.blips;
