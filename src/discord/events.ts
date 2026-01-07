@@ -29,6 +29,8 @@ import {
   resolveAssistantCategoryId,
   getManagedAssistantChannelIds,
   isBlipCommand,
+  isFlashcardCustomId,
+  handleFlashcardButton,
 } from './channels';
 import { handleBlipCommand, handleAssistantCommand } from './commands/index';
 
@@ -161,6 +163,11 @@ export function registerEventHandlers(client: Client, ctx: AppContext) {
 
     if (interaction.isButton() && isBlipsStreamCustomId(interaction.customId)) {
       await handleBlipsStreamButton(interaction);
+      return;
+    }
+
+    if (interaction.isButton() && isFlashcardCustomId(interaction.customId)) {
+      await handleFlashcardButton(interaction);
       return;
     }
 

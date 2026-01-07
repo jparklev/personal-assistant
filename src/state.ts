@@ -12,6 +12,7 @@ export interface AssistantStateConfig {
     lobby?: string;
     meditationLogs?: string; // Voice logs appended to daily notes
     dailies?: string; // Daily voice notes appended to daily notes
+    flashcards?: string; // Spaced repetition flashcard review
   };
 }
 
@@ -72,7 +73,7 @@ export class StateStore {
 
   // Assistant channel management
   setAssistantChannel(
-    type: 'morningCheckin' | 'blips' | 'blipsStream' | 'lobby' | 'meditationLogs' | 'dailies',
+    type: 'morningCheckin' | 'blips' | 'blipsStream' | 'lobby' | 'meditationLogs' | 'dailies' | 'flashcards',
     channelId: string | undefined
   ): void {
     if (!channelId) {
@@ -82,7 +83,7 @@ export class StateStore {
     }
   }
 
-  getAssistantChannel(type: 'morningCheckin' | 'blips' | 'blipsStream' | 'lobby' | 'meditationLogs' | 'dailies'): string | undefined {
+  getAssistantChannel(type: 'morningCheckin' | 'blips' | 'blipsStream' | 'lobby' | 'meditationLogs' | 'dailies' | 'flashcards'): string | undefined {
     return this.state.assistant.channels[type];
   }
 
@@ -133,6 +134,7 @@ export class StateStore {
       if (typeof rawChannels.lobby === 'string') channels.lobby = rawChannels.lobby;
       if (typeof rawChannels.meditationLogs === 'string') channels.meditationLogs = rawChannels.meditationLogs;
       if (typeof rawChannels.dailies === 'string') channels.dailies = rawChannels.dailies;
+      if (typeof rawChannels.flashcards === 'string') channels.flashcards = rawChannels.flashcards;
 
       return {
         version: 1,

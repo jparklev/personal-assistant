@@ -55,7 +55,8 @@ export type ChannelTypeKey =
   | 'blipsStream'
   | 'lobby'
   | 'meditationLogs'
-  | 'dailies';
+  | 'dailies'
+  | 'flashcards';
 
 /**
  * Configuration for a channel that can be identified by state ID or channel name.

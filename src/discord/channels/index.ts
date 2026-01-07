@@ -21,6 +21,7 @@ import { meditationHandler } from './meditation';
 import { dailiesHandler } from './dailies';
 import { blipsHandler } from './blips';
 import { lobbyHandler } from './lobby';
+import { flashcardsHandler, isFlashcardCustomId, handleFlashcardButton } from './flashcards';
 
 // Re-export utilities that events.ts needs
 export {
@@ -30,6 +31,7 @@ export {
   getManagedAssistantChannelIds,
 } from './lobby';
 export { isBlipCommand } from './blips';
+export { isFlashcardCustomId, handleFlashcardButton } from './flashcards';
 export type { ChannelHandler, ChannelMatchContext } from './types';
 
 /**
@@ -43,6 +45,7 @@ export type { ChannelHandler, ChannelMatchContext } from './types';
 const handlers: ChannelHandler[] = [
   lobbyHandler,
   blipsHandler,
+  flashcardsHandler,
   meditationHandler,
   dailiesHandler,
 ].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
