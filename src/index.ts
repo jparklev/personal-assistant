@@ -1,5 +1,6 @@
 import { Events } from 'discord.js';
 import { existsSync } from 'fs';
+import { dirname } from 'path';
 import { loadConfig } from './config';
 import { defaultState, StateStore } from './state';
 import { logJson } from './log';
@@ -8,6 +9,9 @@ import { createDiscordTransport } from './discord/transport';
 import { registerEventHandlers } from './discord/events';
 import { ensureMemoryDirs, initializeMemoryFiles } from './memory';
 import { ensureCapturesDir } from './captures';
+import { SchedulerState } from './scheduler/state';
+import { startSchedulerLoop } from './scheduler/loop';
+import { initFlashcardDeck } from './flashcards';
 
 async function main() {
   const cfg = loadConfig();
@@ -37,8 +41,10 @@ async function main() {
   ensureMemoryDirs();
   initializeMemoryFiles();
   ensureCapturesDir();
+  initFlashcardDeck(cfg.assistantDir);
 
   const store = new StateStore(cfg.stateFile, defaultState());
+  const scheduler = new SchedulerState(dirname(cfg.stateFile));
 
   const client = createDiscordClient();
   const transport = createDiscordTransport(client);
@@ -50,6 +56,14 @@ async function main() {
     console.log(`  Guilds: ${c.guilds.cache.size}`);
     console.log('\nListening for commands...');
     logJson({ event: 'ready', user: c.user.tag, guilds: c.guilds.cache.size });
+
+    // Start the background scheduler
+    startSchedulerLoop({
+      client,
+      cfg,
+      state: store,
+      scheduler,
+    });
   });
 
   client.on('error', (error) => {
