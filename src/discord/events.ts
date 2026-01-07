@@ -707,7 +707,14 @@ ${text}
 
 ## Your Task
 
-**CRITICAL**: When content is shared in #blips, you MUST create a blip file using the EXACT format below. Do NOT improvise the structure - the YAML frontmatter and sections are required for Obsidian compatibility.
+**CRITICAL FORMAT REQUIREMENTS - READ CAREFULLY:**
+
+1. The file MUST start with \`---\` on the very first line (YAML frontmatter delimiter)
+2. Do NOT start with \`# Header\` - that breaks the blip system completely
+3. Do NOT create custom sections like \`## Key insight\` or \`## Lineage\` - ONLY use \`## Capture\`, \`## Notes\`, \`## Log\`
+4. The YAML frontmatter fields (title, status, created, touched, tags, related, source, capture) are REQUIRED
+
+If you create a file without proper YAML frontmatter starting with \`---\`, the blip will be broken and won't appear in blips-stream. Follow the template EXACTLY.
 
 ### If a URL is shared (with or without commentary):
 1. Use WebFetch with this exact prompt: "Return the COMPLETE article/page content as markdown. Preserve ALL text, headings, quotes, code blocks, and formatting. Do not summarize or truncate. Include the title and author if present."
