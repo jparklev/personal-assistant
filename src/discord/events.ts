@@ -643,7 +643,27 @@ async function runAssistantTurn(
   let prompt: string;
 
   if (resumeId) {
-    prompt = `${channelContext}${text}`;
+    // For resumed sessions, add channel-specific reminders
+    if (channelType === 'blips') {
+      const today = isoDateInTimeZone(new Date());
+      const blipsDir = `${ctx.cfg.vaultPath}/Blips`;
+      prompt = `${channelContext}${text}
+
+**Reminder**: This is a #blips conversation. If Josh shares new thoughts or insights, UPDATE the blip file:
+- Append to the **Notes** section
+- Add to **Log**: \`- **${today}**: [summary]\`
+- Update \`touched: ${today}\` in frontmatter
+- Blips are in: ${blipsDir}/`;
+    } else if (channelType === 'health') {
+      const today = isoDateInTimeZone(new Date());
+      prompt = `${channelContext}${text}
+
+**Reminder**: This is a #health conversation. Log any health info to the vault:
+- Supplements → \`Health & Wellness/Supplements/Log.md\`
+- Symptoms/energy → \`Daily/${today}.md\` under \`## Health\``;
+    } else {
+      prompt = `${channelContext}${text}`;
+    }
   } else if (channelType === 'health') {
     // Health channel gets full health context and vault access
     const healthContext = buildHealthContext(ctx.cfg.vaultPath);
@@ -759,6 +779,16 @@ Ask 1-2 thought-provoking questions to help develop the idea:
 - What tension or pattern does this reveal?
 - How does this connect to something Josh is already thinking about?
 - What would be a tiny next step to explore this?
+
+## On Follow-up Messages (continuing the conversation)
+
+When Josh responds with more thoughts, insights, or answers to your questions:
+1. Use Edit to UPDATE the blip file - append his new thoughts to the **Notes** section
+2. Add a timestamped entry to the **Log** section: \`- **${today}**: [brief summary of what was added]\`
+3. Update the \`touched\` date in frontmatter to \`${today}\`
+4. Continue developing the idea with another question if appropriate
+
+The goal is to evolve the blip through conversation - each exchange adds value to the captured idea.
 
 Style:
 - Concise, not verbose
