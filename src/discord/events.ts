@@ -690,8 +690,10 @@ ${text}
 When content is shared in #blips, you MUST create a blip file:
 
 ### If a URL is shared:
-1. Use WebFetch to get the full page content
-2. Create a capture file at \`${capturesDir}/${today}-SLUG.md\` with the full fetched content
+1. Use WebFetch with this exact prompt: "Return the COMPLETE article/page content as markdown. Preserve ALL text, headings, quotes, code blocks, and formatting. Do not summarize or truncate. Include the title and author if present."
+2. Create a capture file at \`${capturesDir}/${today}-SLUG.md\` containing:
+   - The URL as a header
+   - The full WebFetch response (the complete article content)
 3. Create a blip file at \`${blipsDir}/${today}-SLUG.md\` with this format:
 
 \`\`\`markdown
