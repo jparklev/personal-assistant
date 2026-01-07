@@ -689,7 +689,7 @@ ${text}
 
 When content is shared in #blips, you MUST create a blip file:
 
-### If a URL is shared:
+### If a URL is shared (with or without commentary):
 1. Use WebFetch with this exact prompt: "Return the COMPLETE article/page content as markdown. Preserve ALL text, headings, quotes, code blocks, and formatting. Do not summarize or truncate. Include the title and author if present."
 2. Create a capture file at \`${capturesDir}/${today}-SLUG.md\` containing:
    - The URL as a header
@@ -716,12 +716,14 @@ capture: ${today}-SLUG.md
 
 ## Notes
 
-(Add notes.)
+[If the user included any commentary, thoughts, or notes alongside the URL, put them here. Otherwise leave as "(Add notes.)"]
 
 ## Log
 
 - **${today}**: Captured from #blips
 \`\`\`
+
+**Important**: If Josh shares thoughts alongside a URL (e.g., "https://example.com - this reminds me of X"), capture those thoughts in the Notes section. His commentary is valuable context.
 
 ### If text/idea is shared (no URL):
 Create a blip file at \`${blipsDir}/${today}-SLUG.md\` (no capture file needed):
