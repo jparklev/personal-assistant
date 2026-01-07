@@ -707,7 +707,7 @@ ${text}
 
 ## Your Task
 
-When content is shared in #blips, you MUST create a blip file:
+**CRITICAL**: When content is shared in #blips, you MUST create a blip file using the EXACT format below. Do NOT improvise the structure - the YAML frontmatter and sections are required for Obsidian compatibility.
 
 ### If a URL is shared (with or without commentary):
 1. Use WebFetch with this exact prompt: "Return the COMPLETE article/page content as markdown. Preserve ALL text, headings, quotes, code blocks, and formatting. Do not summarize or truncate. Include the title and author if present."
@@ -742,6 +742,8 @@ capture: ${today}-SLUG.md
 
 - **${today}**: Captured from #blips
 \`\`\`
+
+**FORMAT IS MANDATORY**: The YAML frontmatter (between ---) and sections (## Capture, ## Notes, ## Log) are required. Do not create free-form markdown or custom sections.
 
 **Important**: If Josh shares thoughts alongside a URL (e.g., "https://example.com - this reminds me of X"), capture those thoughts in the Notes section. His commentary is valuable context.
 
