@@ -12,6 +12,9 @@ import type { DiscordTransport } from './transport';
 import type { AppConfig } from '../config';
 import type { StateStore } from '../state';
 import { buildAssistantContext } from '../assistant/invoke';
+import { buildHealthContext, recordUserResponse } from '../health';
+import { isoDateInTimeZone } from '../time';
+import { requestVaultSync } from '../vault/sync-queue';
 import { invokeClaude, type RunnerEvent } from '../assistant/runner';
 import { storeSession, getSession, setSessionMetadata, getSessionMetadata } from '../assistant/sessions';
 import { ProgressRenderer } from '../assistant/progress';
@@ -45,7 +48,7 @@ export interface AppContext {
 type QueuedAssistantMessage = {
   message: Message;
   text: string;
-  channelType: 'general' | 'morning-checkin' | 'blips' | 'lobby';
+  channelType: 'general' | 'morning-checkin' | 'blips' | 'lobby' | 'health';
 };
 
 type RunningAssistantTask = {
@@ -242,8 +245,10 @@ export function registerEventHandlers(client: Client, ctx: AppContext) {
       return;
     }
 
-    // Priority 4: Core assistant channels (morning checkin)
-    const isAssistantChannel = message.channelId === assistantChannels.morningCheckin;
+    // Priority 4: Core assistant channels (morning checkin, health)
+    const isAssistantChannel =
+      message.channelId === assistantChannels.morningCheckin ||
+      message.channelId === assistantChannels.health;
     const isManagedChannel = managed.includes(message.channelId);
 
     if (isAssistantChannel || isManagedChannel) {
@@ -467,12 +472,20 @@ async function handleAssistantMessage(message: Message, ctx: AppContext): Promis
   if (message.channelId === assistantChannels.morningCheckin) channelType = 'morning-checkin';
   else if (message.channelId === assistantChannels.blips) channelType = 'blips';
   else if (message.channelId === assistantChannels.lobby) channelType = 'lobby';
+  else if (message.channelId === assistantChannels.health) channelType = 'health';
+
+  // Record user response for health check-in tracking.
+  // (Any activity in #health counts as "not ignored".)
+  if (channelType === 'health') {
+    recordUserResponse();
+  }
 
   // Ensure per-channel memory exists for managed/category channels
   const isCore =
     message.channelId === assistantChannels.morningCheckin ||
     message.channelId === assistantChannels.blips ||
-    message.channelId === assistantChannels.lobby;
+    message.channelId === assistantChannels.lobby ||
+    message.channelId === assistantChannels.health;
 
   if (!isCore) {
     const managed = getManagedAssistantChannelIds(ctx.state);
@@ -626,9 +639,40 @@ async function runAssistantTurn(
 
   await task.requestRender();
 
-  const prompt = resumeId
-    ? `${channelContext}${text}`
-    : `You are the personal assistant responding in the ${channelType} Discord channel.
+  // Build the prompt - health channel gets specialized context
+  let prompt: string;
+
+  if (resumeId) {
+    prompt = `${channelContext}${text}`;
+  } else if (channelType === 'health') {
+    // Health channel gets full health context and vault access
+    const healthContext = buildHealthContext(ctx.cfg.vaultPath);
+    prompt = `You are Josh's health assistant responding in the #health Discord channel.
+
+${healthContext}
+
+${channelContext}${conversationContext}## Current User Message
+
+${text}
+
+## Instructions
+
+You have access to Josh's full health context in the vault. Use the Read, Edit, and Write tools to:
+- Read health files for details (don't guess - look it up)
+- Append supplement logs to \`Health & Wellness/Supplements/Log.md\`
+- Append symptoms/energy to \`Daily/${isoDateInTimeZone(new Date())}.md\` under a \`## Health\` section
+
+When logging, use formats consistent with existing entries. Check the files first if unsure.
+
+Style:
+- Concise, not verbose
+- Ask clarifying questions when needed
+- Encourage thinking about health patterns
+- No emojis unless asked
+
+Output your response message directly.`;
+  } else {
+    prompt = `You are the personal assistant responding in the ${channelType} Discord channel.
 
 ${buildAssistantContext()}
 
@@ -650,6 +694,7 @@ Respond as a thoughtful personal assistant. Remember:
 If the user shares something you should remember, note it. If they correct you, acknowledge it.
 
 Output ONLY your response message, nothing else.`;
+  }
 
   let finalSessionId: string | null = resumeId;
 
@@ -709,6 +754,14 @@ Output ONLY your response message, nothing else.`;
           storeSession(followUp.id, result.sessionId);
           remaining = remaining.slice(1900);
         }
+      }
+
+      // Sync vault if file-modifying tools were used (especially for health channel)
+      const fileTools = ['Edit', 'Write', 'NotebookEdit', 'MultiEdit'];
+      if (result.toolsUsed.some((t) => fileTools.includes(t))) {
+        const today = isoDateInTimeZone(new Date());
+        const commitMsg = channelType === 'health' ? `health: ${today}` : `assistant: ${today}`;
+        requestVaultSync(ctx.cfg.vaultPath, commitMsg);
       }
     } else {
       progressEditor.close();

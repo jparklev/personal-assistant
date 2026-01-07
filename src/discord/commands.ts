@@ -72,6 +72,7 @@ export const commands = [
               { name: 'Blips', value: 'blips' },
               { name: 'Blips Stream', value: 'blipsStream' },
               { name: 'Lobby', value: 'lobby' },
+              { name: 'Health', value: 'health' },
               { name: 'Meditation Logs', value: 'meditationLogs' },
               { name: 'Dailies', value: 'dailies' }
             )

@@ -14,6 +14,11 @@ import { getDueQuestions, markQuestionAsked } from '../memory';
 import { getTodayReminders } from '../integrations/reminders';
 import { buildAssistantContext } from '../assistant/invoke';
 import { invokeClaude } from '../assistant/runner';
+import {
+  buildHealthCheckinMessage,
+  shouldSendCheckin,
+  recordCheckinSent,
+} from '../health';
 
 const CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 
@@ -64,6 +69,26 @@ async function runSchedulerTick(ctx: SchedulerContext): Promise<void> {
       }
     } catch (err) {
       console.error('[Scheduler] Morning check-in failed:', err);
+    }
+  }
+
+  // Check health check-in (before evening check-in)
+  if (scheduler.isDailyTaskDue('healthCheckin')) {
+    console.log('[Scheduler] Health check-in is due');
+    try {
+      const result = await runHealthCheckinTask(ctx);
+      if (result.ok) {
+        scheduler.markRun('healthCheckin');
+        console.log(
+          result.sent
+            ? '[Scheduler] Health check-in sent'
+            : `[Scheduler] Health check-in skipped: ${result.message}`
+        );
+      } else {
+        console.error('[Scheduler] Health check-in failed:', result.message);
+      }
+    } catch (err) {
+      console.error('[Scheduler] Health check-in failed:', err);
     }
   }
 
@@ -340,5 +365,43 @@ This is a gentle weekly reflection, not a performance review. Be direct but kind
   } catch (err) {
     console.error('[Scheduler] Failed to send weekly reconsolidation:', err);
     return false;
+  }
+}
+
+/**
+ * Health check-in task.
+ *
+ * Sends to the health channel with protocol awareness.
+ * Respects anti-spam logic from health state.
+ */
+type HealthCheckinResult = { ok: boolean; sent: boolean; message: string };
+
+async function runHealthCheckinTask(ctx: SchedulerContext): Promise<HealthCheckinResult> {
+
+  const channelId = ctx.state.snapshot.assistant.channels.health;
+  if (!channelId) {
+    return { ok: true, sent: false, message: 'Health channel not configured' };
+  }
+
+  // Check anti-spam logic
+  const { send, reason } = shouldSendCheckin();
+  if (!send) {
+    return { ok: true, sent: false, message: reason };
+  }
+
+  const channel = await ctx.client.channels.fetch(channelId);
+  if (!channel || !channel.isTextBased()) {
+    return { ok: false, sent: false, message: 'Could not fetch health channel' };
+  }
+
+  const { text: message } = buildHealthCheckinMessage(ctx.cfg.vaultPath);
+
+  try {
+    await (channel as any).send(message);
+    recordCheckinSent();
+    return { ok: true, sent: true, message: 'Sent' };
+  } catch (err) {
+    console.error('[Scheduler] Failed to send health check-in:', err);
+    return { ok: false, sent: false, message: err instanceof Error ? err.message : String(err) };
   }
 }

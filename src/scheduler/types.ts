@@ -5,6 +5,7 @@ export interface SchedulerContext {
   channels: {
     morningCheckin?: string;
     blips?: string;
+    health?: string;
   };
 }
 
@@ -30,4 +31,4 @@ export interface TaskResult {
   data?: Record<string, unknown>;
 }
 
-export type TaskName = 'morning-checkin' | 'weekly-reconsolidation' | 'periodic-nudge';
+export type TaskName = 'morning-checkin' | 'weekly-reconsolidation' | 'periodic-nudge' | 'health-checkin';

@@ -56,6 +56,7 @@ async function handleChannel(
     | 'blips'
     | 'blipsStream'
     | 'lobby'
+    | 'health'
     | 'meditationLogs'
     | 'dailies';
   const channel = interaction.options.getChannel('channel', true);
@@ -69,6 +70,7 @@ async function handleChannel(
     blips: 'Blips',
     blipsStream: 'Blips Stream',
     lobby: 'Lobby',
+    health: 'Health',
     meditationLogs: 'Meditation Logs',
     dailies: 'Dailies',
   };
@@ -110,6 +112,7 @@ async function handleStatus(
     channels.blips ? `  Blips: <#${channels.blips}>` : '  Blips: not set',
     channels.blipsStream ? `  Blips Stream: <#${channels.blipsStream}>` : '  Blips Stream: not set',
     channels.lobby ? `  Lobby: <#${channels.lobby}>` : '  Lobby: not set',
+    channels.health ? `  Health: <#${channels.health}>` : '  Health: not set',
     channels.meditationLogs
       ? `  Meditation: <#${channels.meditationLogs}>`
       : '  Meditation: not set',
