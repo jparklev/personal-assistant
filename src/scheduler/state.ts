@@ -24,6 +24,7 @@ export interface ScheduleState {
   version: 1;
   morningCheckin: ScheduledTaskConfig;
   eveningCheckin: ScheduledTaskConfig;
+  healthCheckin: ScheduledTaskConfig;
   weeklyReconsolidation: WeeklyTaskConfig;
 }
 
@@ -38,6 +39,11 @@ export function defaultScheduleState(): ScheduleState {
     eveningCheckin: {
       enabled: true,
       time: '21:00',
+      timezone: 'America/Los_Angeles',
+    },
+    healthCheckin: {
+      enabled: true,
+      time: '20:00', // 8 PM - before evening checkin
       timezone: 'America/Los_Angeles',
     },
     weeklyReconsolidation: {
@@ -140,7 +146,7 @@ export class SchedulerState {
    * - Current time is past the scheduled time
    * - It hasn't run today
    */
-  isDailyTaskDue(task: 'morningCheckin' | 'eveningCheckin'): boolean {
+  isDailyTaskDue(task: 'morningCheckin' | 'eveningCheckin' | 'healthCheckin'): boolean {
     const config = this.state[task];
     if (!config.enabled) return false;
 
@@ -193,9 +199,10 @@ export class SchedulerState {
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const lines: string[] = ['**Current Schedule**', ''];
 
-    const { morningCheckin, eveningCheckin, weeklyReconsolidation } = this.state;
+    const { morningCheckin, eveningCheckin, healthCheckin, weeklyReconsolidation } = this.state;
 
     lines.push(`Morning check-in: ${morningCheckin.enabled ? morningCheckin.time : 'disabled'} (${morningCheckin.timezone})`);
+    lines.push(`Health check-in: ${healthCheckin.enabled ? healthCheckin.time : 'disabled'} (${healthCheckin.timezone})`);
     lines.push(`Evening check-in: ${eveningCheckin.enabled ? eveningCheckin.time : 'disabled'} (${eveningCheckin.timezone})`);
     lines.push(`Weekly reconsolidation: ${weeklyReconsolidation.enabled ? `${dayNames[weeklyReconsolidation.dayOfWeek]} ${weeklyReconsolidation.time}` : 'disabled'}`);
 
@@ -220,6 +227,7 @@ export class SchedulerState {
         version: 1,
         morningCheckin: { ...defaults.morningCheckin, ...parsed.morningCheckin },
         eveningCheckin: { ...defaults.eveningCheckin, ...parsed.eveningCheckin },
+        healthCheckin: { ...defaults.healthCheckin, ...parsed.healthCheckin },
         weeklyReconsolidation: { ...defaults.weeklyReconsolidation, ...parsed.weeklyReconsolidation },
       };
     } catch {

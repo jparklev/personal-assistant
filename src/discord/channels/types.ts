@@ -56,7 +56,8 @@ export type ChannelTypeKey =
   | 'lobby'
   | 'meditationLogs'
   | 'dailies'
-  | 'flashcards';
+  | 'flashcards'
+  | 'health';
 
 /**
  * Configuration for a channel that can be identified by state ID or channel name.

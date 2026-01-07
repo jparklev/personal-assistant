@@ -21,6 +21,7 @@ import { resolveVaultPath } from '../config';
 import type { SchedulerContext, TaskName, TaskResult } from './types';
 import { runMorningCheckin } from './tasks/morning-checkin';
 import { runWeeklyReconsolidation } from './tasks/weekly-reconsolidation';
+import { runHealthCheckin } from './tasks/health-checkin';
 
 // Load environment variables from .env if present
 function loadEnv() {
@@ -75,6 +76,7 @@ const tasks: Record<TaskName, (ctx: SchedulerContext) => Promise<TaskResult>> = 
   'morning-checkin': runMorningCheckin,
   'weekly-reconsolidation': runWeeklyReconsolidation,
   'periodic-nudge': async () => ({ success: true, message: 'Nudge not implemented yet' }),
+  'health-checkin': runHealthCheckin,
 };
 
 async function main() {
