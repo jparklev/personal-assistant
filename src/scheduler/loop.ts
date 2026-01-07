@@ -207,7 +207,7 @@ ${
   let message = fallback;
 
   try {
-    const result = await invokeClaude(prompt, { model: 'haiku' });
+    const result = await invokeClaude(prompt, { model: 'opus' });
     if (result.ok && result.text) message = result.text;
   } catch (err) {
     console.error('[Scheduler] Failed to generate morning check-in:', err);
@@ -285,7 +285,7 @@ Be brief. This is a wind-down, not a debrief. No emojis.
   let message = fallback;
 
   try {
-    const result = await invokeClaude(prompt, { model: 'haiku' });
+    const result = await invokeClaude(prompt, { model: 'opus' });
     if (result.ok && result.text) message = result.text;
   } catch (err) {
     console.error('[Scheduler] Failed to generate evening check-in:', err);
