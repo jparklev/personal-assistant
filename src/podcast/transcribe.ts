@@ -59,46 +59,86 @@ export function getPodcastType(url: string): string | null {
 
 /**
  * Fetch podcast info and audio URL from a Pocket Casts episode page
+ *
+ * Pocket Casts is a React SPA, so we need to:
+ * 1. Fetch the main page to get metadata (title, show)
+ * 2. Fetch the oEmbed data to get the embed URL
+ * 3. Fetch the embed page to get the actual audio URL
  */
 async function fetchPocketCastsInfo(url: string): Promise<PodcastInfo | null> {
   try {
-    // Fetch the episode page
+    // Fetch the episode page for metadata
     const response = await fetch(url);
     const html = await response.text();
 
-    // Extract title from og:title or page title
+    // Extract title from og:title
     const titleMatch = html.match(/<meta property="og:title" content="([^"]+)"/);
-    const title = titleMatch?.[1] || 'Unknown Episode';
+    const title = decodeHtmlEntities(titleMatch?.[1] || 'Unknown Episode');
 
-    // Extract show name
-    const showMatch = html.match(/<meta property="og:site_name" content="([^"]+)"/);
-    const show = showMatch?.[1] || 'Unknown Podcast';
+    // Extract show name from twitter:title or fall back to author_name from oEmbed
+    let show = 'Unknown Podcast';
 
-    // Extract audio URL - look for various patterns
-    // Pocket Casts typically has the audio URL in a data attribute or script
-    const audioMatch = html.match(/(?:src|url|audio)['":\s]+['"]?(https?:\/\/[^'">\s]+\.(?:mp3|m4a|opus|ogg)[^'">\s]*)/i);
+    // Extract canonical URL for oEmbed lookup
+    const canonicalMatch = html.match(/<link rel="canonical" href="([^"]+)"/);
+    const canonicalUrl = canonicalMatch?.[1] || url;
 
     // "Read more" often points to the podcast's own site (sometimes includes transcript)
     const readMoreMatch = html.match(/href="(https?:\/\/[^"]+)"[^>]*>\s*Read more\s*<\/a>/i);
     const readMoreUrl = readMoreMatch?.[1];
 
-    if (!audioMatch) {
-      // Try to find it in JSON-LD or other structured data
+    // Try to get audio URL from the embed page via oEmbed
+    let audioUrl = '';
+    try {
+      const oembedUrl = `https://pca.st/oembed.json?url=${encodeURIComponent(canonicalUrl)}`;
+      console.log(`Fetching oEmbed from ${oembedUrl}...`);
+      const oembedRes = await fetch(oembedUrl);
+      if (oembedRes.ok) {
+        const oembed = await oembedRes.json();
+        show = oembed.author_name || show;
+
+        // Extract embed URL from the iframe HTML
+        const embedMatch = oembed.html?.match(/src="([^"]+)"/);
+        if (embedMatch) {
+          const embedUrl = embedMatch[1];
+          console.log(`Fetching embed page ${embedUrl}...`);
+          // Fetch the embed page which has the audio tag
+          const embedRes = await fetch(embedUrl);
+          if (embedRes.ok) {
+            const embedHtml = await embedRes.text();
+            const audioMatch = embedHtml.match(/<audio[^>]+src="([^"]+)"/);
+            if (audioMatch) {
+              audioUrl = audioMatch[1];
+              console.log(`Found audio URL: ${audioUrl}`);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error fetching oEmbed/embed:', e);
+    }
+
+    // Fallback: try to find audio URL directly in main page (older format)
+    if (!audioUrl) {
+      const audioMatch = html.match(/(?:src|url|audio)['":\s]+['"]?(https?:\/\/[^'">\s]+\.(?:mp3|m4a|opus|ogg)[^'">\s]*)/i);
+      if (audioMatch) {
+        audioUrl = audioMatch[1];
+      }
+    }
+
+    // Fallback: try JSON-LD
+    if (!audioUrl) {
       const jsonLdMatch = html.match(/<script type="application\/ld\+json">([^<]+)<\/script>/);
       if (jsonLdMatch) {
         try {
           const jsonLd = JSON.parse(jsonLdMatch[1]);
           if (jsonLd.contentUrl) {
-            return { title, show, audioUrl: jsonLd.contentUrl, readMoreUrl };
+            audioUrl = jsonLd.contentUrl;
           }
         } catch {}
       }
-
-      // No direct audio URL found; still return metadata so callers can follow readMoreUrl.
-      return { title, show, audioUrl: '', readMoreUrl };
     }
 
-    return { title, show, audioUrl: audioMatch[1], readMoreUrl };
+    return { title, show, audioUrl, readMoreUrl };
   } catch (error) {
     console.error('Error fetching Pocket Casts info:', error);
     return null;
@@ -366,7 +406,8 @@ export async function transcribePodcast(
 
   try {
     // Transcribe
-    progress('Transcribing with mlx-whisper (this may take 5-15 minutes)...');
+    const method = await getTranscriptionMethod();
+    progress(`Transcribing with ${method} (this may take 5-15 minutes)...`);
     const transcript = await transcribeAudioFile(audioPath);
 
     if (!transcript) {
