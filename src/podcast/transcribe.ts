@@ -10,7 +10,7 @@
  */
 
 import { spawn, execSync } from 'child_process';
-import { existsSync, unlinkSync, mkdirSync, readFileSync } from 'fs';
+import { existsSync, unlinkSync, mkdirSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir, homedir, platform } from 'os';
 
@@ -273,34 +273,121 @@ async function transcribeWithMlxWhisper(audioPath: string): Promise<string | nul
 }
 
 /**
+ * Get audio duration in seconds using ffprobe
+ */
+function getAudioDuration(audioPath: string): number {
+  try {
+    const result = execSync(
+      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${audioPath}"`,
+      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+    );
+    return parseFloat(result.trim()) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Transcribe a single audio chunk with faster-whisper
+ */
+async function transcribeChunk(venvPython: string, chunkPath: string): Promise<string | null> {
+  const script = [
+    'import sys',
+    'from faster_whisper import WhisperModel',
+    "model = WhisperModel('tiny', device='cpu', compute_type='int8')",
+    'segments, _ = model.transcribe(sys.argv[1], beam_size=1)',
+    "print(' '.join(s.text.strip() for s in segments))",
+  ].join('\n');
+
+  const result = await runCommand(venvPython, ['-c', script, chunkPath], {
+    timeoutMs: 600000, // 10 min per chunk
+    env: { ...process.env, OMP_NUM_THREADS: '2' }, // Limit threads to reduce memory
+  });
+
+  if (!result.ok) {
+    console.error('Chunk transcription failed:', result.stderr);
+    return null;
+  }
+
+  return result.stdout.trim() || null;
+}
+
+/**
  * Transcribe audio file using faster-whisper (Linux/VPS)
+ * For long audio (>10min), splits into chunks to avoid OOM on memory-constrained VPS
  */
 async function transcribeWithFasterWhisper(audioPath: string): Promise<string | null> {
   const venvPython = join(homedir(), 'whisper-venv', 'bin', 'python');
+  const CHUNK_DURATION = 600; // 10 minutes per chunk
 
   try {
-    console.log(`Transcribing ${audioPath} with faster-whisper...`);
+    const duration = getAudioDuration(audioPath);
+    console.log(`Audio duration: ${(duration / 60).toFixed(1)} minutes`);
 
-    // Use 'tiny' model to fit in limited VPS RAM, beam_size=1 for memory efficiency
-    const script = [
-      'import sys',
-      'from faster_whisper import WhisperModel',
-      "model = WhisperModel('tiny', device='cpu', compute_type='int8')",
-      'segments, _ = model.transcribe(sys.argv[1], beam_size=1)',
-      "print(' '.join(s.text.strip() for s in segments))",
-    ].join('\n');
+    // For short audio, transcribe directly
+    if (duration <= CHUNK_DURATION) {
+      console.log(`Transcribing ${audioPath} with faster-whisper...`);
+      return await transcribeChunk(venvPython, audioPath);
+    }
 
-    const result = await runCommand(venvPython, ['-c', script, audioPath], {
-      timeoutMs: 1800000, // 30 minute timeout for long podcasts
-      env: { ...process.env, OMP_NUM_THREADS: '4' },
-    });
+    // For long audio, split into chunks to avoid OOM
+    console.log(`Long audio detected. Splitting into ${Math.ceil(duration / CHUNK_DURATION)} chunks...`);
 
-    if (!result.ok) {
-      console.error('faster-whisper failed:', result.stderr);
+    const chunkPrefix = `chunk-${Date.now()}`;
+    const chunkPattern = join(TEMP_DIR, `${chunkPrefix}-%03d.mp3`);
+
+    try {
+      // Split audio into 10-minute chunks
+      execSync(
+        `ffmpeg -i "${audioPath}" -f segment -segment_time ${CHUNK_DURATION} -c copy "${chunkPattern}"`,
+        { stdio: 'pipe', timeout: 300000 }
+      );
+    } catch (e) {
+      console.error('Failed to split audio:', e);
+      // Fall back to direct transcription (might OOM)
+      return await transcribeChunk(venvPython, audioPath);
+    }
+
+    // Find all chunk files
+    const chunks = readdirSync(TEMP_DIR)
+      .filter(f => f.startsWith(chunkPrefix) && f.endsWith('.mp3'))
+      .sort()
+      .map(f => join(TEMP_DIR, f));
+
+    if (chunks.length === 0) {
+      console.error('No chunks created');
+      return await transcribeChunk(venvPython, audioPath);
+    }
+
+    console.log(`Created ${chunks.length} chunks. Transcribing sequentially...`);
+    const transcripts: string[] = [];
+
+    for (let i = 0; i < chunks.length; i++) {
+      const chunkPath = chunks[i];
+      console.log(`Transcribing chunk ${i + 1}/${chunks.length}...`);
+
+      const transcript = await transcribeChunk(venvPython, chunkPath);
+
+      // Clean up chunk immediately after transcription
+      try { unlinkSync(chunkPath); } catch {}
+
+      if (transcript) {
+        transcripts.push(transcript);
+      } else {
+        console.error(`Chunk ${i + 1} failed, continuing...`);
+      }
+
+      // Brief pause between chunks to let memory settle
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    if (transcripts.length === 0) {
+      console.error('All chunks failed');
       return null;
     }
 
-    return result.stdout.trim() || null;
+    console.log(`Transcribed ${transcripts.length}/${chunks.length} chunks successfully`);
+    return transcripts.join(' ');
   } catch (error) {
     console.error('Error transcribing with faster-whisper:', error);
     return null;
