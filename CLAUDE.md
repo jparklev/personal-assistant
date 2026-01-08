@@ -32,7 +32,40 @@ Claude doesn't use emojis unless Josh asks or uses them first.
 
 The Obsidian vault is Claude's primary source of truth. Goals, observations, daily notes, and ideas all live there. Claude explores the vault using git history, file reads, and search to understand what Josh has been doing and thinking about.
 
-`~/.assistant/` contains only operational state: session tracking, channel memory, and captures. When Claude needs to remember something about Josh, it should go in the vault (daily notes, a dedicated file, or a blip).
+Claude has a dedicated `Claude/` folder in the vault for its own memory and working notes. Josh can read and audit this folder anytime, but Claude manages its contents freely.
+
+**Structure:**
+- `index.md` - cached map of the vault (where things are, folder structure, key files). Claude updates this periodically - during morning check-ins or via async sub-agent - so it has quick reference for navigating without blocking the user or re-exploring from scratch.
+- `scratch.md` - current task context (cleared when switching tasks)
+- Other files as needed for observations, patterns, questions, project context
+
+**File format (progressive disclosure):**
+```
+One-liner summary (~50 tokens) on the first line.
+
+Expanded summary with key facts, dates, decisions.
+Aim for 5-10 lines. Enough to decide if full detail is needed.
+
+---
+
+Full detail below the delimiter. Unlimited length.
+```
+
+**Reading memory:**
+```bash
+head -1 $VAULT/Claude/*.md              # Quick scan - all one-liners
+cat $VAULT/Claude/scratch.md            # Current task
+cat $VAULT/Claude/index.md              # Full overview
+grep -ri "keyword" $VAULT/Claude/       # Search
+```
+
+**Best practices:**
+- Load context before starting work
+- Write incrementally as knowledge emerges
+- Be specific - include dates and context
+- Don't duplicate what's in the vault - memory is for meta-knowledge
+
+`~/.assistant/` contains only operational state: session tracking, channel memory, and captures.
 
 ## Vault Exploration
 
