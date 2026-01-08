@@ -15,9 +15,11 @@
   },
   "dependencies": {
     "discord.js": "^14.14.1",
+    "form-data": "^4.0.5",
     "nanoid": "^5.0.0"
   },
   "devDependencies": {
+    "@types/form-data": "^2.2.1",
     "@types/node": "^20.10.0",
     "typescript": "^5.3.0"
   }

@@ -308,24 +308,125 @@ async function transcribeWithFasterWhisper(audioPath: string): Promise<string | 
 }
 
 /**
+ * Transcribe audio file using OpenAI Whisper API
+ * Used as fallback when local methods fail (e.g., OOM on VPS)
+ */
+async function transcribeWithOpenAI(audioPath: string): Promise<string | null> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    console.error('OPENAI_API_KEY not set');
+    return null;
+  }
+
+  try {
+    // Check file size - OpenAI limit is 25MB
+    const stats = require('fs').statSync(audioPath);
+    const fileSizeMB = stats.size / (1024 * 1024);
+    console.log(`Audio file size: ${fileSizeMB.toFixed(1)}MB`);
+
+    let uploadPath = audioPath;
+
+    // If file is too large, compress it with ffmpeg
+    if (fileSizeMB > 24) {
+      console.log('File too large for OpenAI API, compressing with ffmpeg...');
+      const compressedPath = audioPath.replace(/\.[^.]+$/, '_compressed.mp3');
+
+      try {
+        // Compress to mono 64kbps - should get ~0.5MB/min
+        execSync(
+          `ffmpeg -y -i "${audioPath}" -ac 1 -ab 64k -ar 16000 "${compressedPath}"`,
+          { stdio: 'pipe', timeout: 300000 }
+        );
+
+        if (existsSync(compressedPath)) {
+          const compressedStats = require('fs').statSync(compressedPath);
+          console.log(`Compressed to ${(compressedStats.size / (1024 * 1024)).toFixed(1)}MB`);
+          uploadPath = compressedPath;
+        }
+      } catch (e) {
+        console.error('ffmpeg compression failed:', e);
+        // Continue with original file, might still work
+      }
+    }
+
+    console.log('Uploading to OpenAI Whisper API...');
+
+    // Create form data for multipart upload
+    const FormData = (await import('form-data')).default;
+    const form = new FormData();
+    form.append('file', require('fs').createReadStream(uploadPath));
+    form.append('model', 'whisper-1');
+    form.append('response_format', 'text');
+
+    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        ...form.getHeaders(),
+      },
+      body: form as any,
+    });
+
+    // Clean up compressed file if we made one
+    if (uploadPath !== audioPath && existsSync(uploadPath)) {
+      unlinkSync(uploadPath);
+    }
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('OpenAI API error:', response.status, error);
+      return null;
+    }
+
+    const transcript = await response.text();
+    console.log('OpenAI transcription complete');
+    return transcript.trim() || null;
+  } catch (error) {
+    console.error('Error transcribing with OpenAI:', error);
+    return null;
+  }
+}
+
+/**
+ * Check if OpenAI API is available as fallback
+ */
+function isOpenAIAvailable(): boolean {
+  return !!process.env.OPENAI_API_KEY;
+}
+
+/**
  * Transcribe audio file using the best available method
+ * Tries local methods first, falls back to OpenAI API if local fails
  */
 export async function transcribeAudioFile(audioPath: string): Promise<string | null> {
   const method = await getTranscriptionMethod();
 
-  if (!method) {
-    console.error('No transcription method available');
-    return null;
+  // Try local transcription first
+  if (method) {
+    console.log(`Using transcription method: ${method}`);
+
+    let result: string | null = null;
+
+    if (method === 'mlx_whisper') {
+      result = await transcribeWithMlxWhisper(audioPath);
+    } else if (method === 'faster-whisper') {
+      result = await transcribeWithFasterWhisper(audioPath);
+    }
+
+    if (result) {
+      return result;
+    }
+
+    console.log('Local transcription failed, checking for OpenAI fallback...');
   }
 
-  console.log(`Using transcription method: ${method}`);
-
-  if (method === 'mlx_whisper') {
-    return await transcribeWithMlxWhisper(audioPath);
-  } else if (method === 'faster-whisper') {
-    return await transcribeWithFasterWhisper(audioPath);
+  // Fall back to OpenAI API if available
+  if (isOpenAIAvailable()) {
+    console.log('Falling back to OpenAI Whisper API...');
+    return await transcribeWithOpenAI(audioPath);
   }
 
+  console.error('No transcription method available');
   return null;
 }
 
