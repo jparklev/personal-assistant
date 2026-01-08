@@ -8,6 +8,7 @@
 import type { Client, TextChannel } from 'discord.js';
 import type { AppConfig } from '../config';
 import type { StateStore } from '../state';
+import { execSync } from 'child_process';
 import { SchedulerState } from './state';
 import { getBlipsToSurface, readBlip, touchBlip } from '../blips';
 import { getDueQuestions, markQuestionAsked } from '../memory';
@@ -55,6 +56,17 @@ export function startSchedulerLoop(ctx: SchedulerContext): void {
  */
 async function runSchedulerTick(ctx: SchedulerContext): Promise<void> {
   const { scheduler } = ctx;
+
+  // Pull latest vault changes (fast-forward only to avoid conflicts)
+  try {
+    execSync('git fetch && git pull --ff-only', {
+      cwd: ctx.cfg.vaultPath,
+      stdio: 'ignore',
+      timeout: 30_000,
+    });
+  } catch {
+    // Ignore failures - vault may have local changes or network issues
+  }
 
   // Check morning check-in
   if (scheduler.isDailyTaskDue('morningCheckin')) {
