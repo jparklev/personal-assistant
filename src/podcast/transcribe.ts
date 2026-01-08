@@ -1,18 +1,18 @@
 /**
- * Podcast transcription using mlx-whisper
+ * Podcast transcription using mlx-whisper or faster-whisper
  *
  * Workflow:
  * 1. Detect podcast URL type
  * 2. Fetch audio URL from podcast page/RSS
  * 3. Download audio to temp file
- * 4. Transcribe with mlx-whisper
+ * 4. Transcribe with mlx-whisper (macOS) or faster-whisper (Linux/VPS)
  * 5. Clean up and return transcript
  */
 
-import { execSync, spawn } from 'child_process';
-import { existsSync, unlinkSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
+import { spawn, execSync } from 'child_process';
+import { existsSync, unlinkSync, mkdirSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { tmpdir } from 'os';
+import { tmpdir, homedir, platform } from 'os';
 
 const TEMP_DIR = join(tmpdir(), 'podcast-transcribe');
 
@@ -197,24 +197,25 @@ async function downloadAudio(audioUrl: string, filename: string): Promise<string
 }
 
 /**
- * Transcribe audio file using mlx-whisper
+ * Transcribe audio file using mlx-whisper (macOS)
  */
-export async function transcribeAudioFile(audioPath: string): Promise<string | null> {
+async function transcribeWithMlxWhisper(audioPath: string): Promise<string | null> {
   const outputPath = audioPath.replace(/\.[^.]+$/, '.txt');
 
   try {
-    console.log(`Transcribing ${audioPath}...`);
+    console.log(`Transcribing ${audioPath} with mlx_whisper...`);
 
-    // Run mlx_whisper - use large-v3 for best quality
-    // Output to text file
-    execSync(
-      `mlx_whisper "${audioPath}" --model large-v3 --output-format txt --output-dir "${TEMP_DIR}"`,
-      {
-        timeout: 1800000, // 30 minute timeout for long podcasts
-        stdio: 'pipe',
-        env: { ...process.env, PATH: `${process.env.PATH}:/Users/joshlevine/.local/bin` }
-      }
+    const env = { ...process.env, PATH: `${process.env.PATH}:/Users/joshlevine/.local/bin` };
+    const result = await runCommand(
+      'mlx_whisper',
+      [audioPath, '--model', 'large-v3', '--output-format', 'txt', '--output-dir', TEMP_DIR],
+      { timeoutMs: 1800000, env } // 30 minute timeout for long podcasts
     );
+
+    if (!result.ok) {
+      console.error('mlx_whisper failed:', result.stderr);
+      return null;
+    }
 
     // Read the transcript
     if (existsSync(outputPath)) {
@@ -226,9 +227,66 @@ export async function transcribeAudioFile(audioPath: string): Promise<string | n
 
     return null;
   } catch (error) {
-    console.error('Error transcribing audio:', error);
+    console.error('Error transcribing with mlx_whisper:', error);
     return null;
   }
+}
+
+/**
+ * Transcribe audio file using faster-whisper (Linux/VPS)
+ */
+async function transcribeWithFasterWhisper(audioPath: string): Promise<string | null> {
+  const venvPython = join(homedir(), 'whisper-venv', 'bin', 'python');
+
+  try {
+    console.log(`Transcribing ${audioPath} with faster-whisper...`);
+
+    // Use 'base' model for speed on VPS, beam_size=5 for accuracy
+    const script = [
+      'import sys',
+      'from faster_whisper import WhisperModel',
+      "model = WhisperModel('base', device='cpu', compute_type='int8')",
+      'segments, _ = model.transcribe(sys.argv[1], beam_size=5)',
+      "print(' '.join(s.text.strip() for s in segments))",
+    ].join('\n');
+
+    const result = await runCommand(venvPython, ['-c', script, audioPath], {
+      timeoutMs: 1800000, // 30 minute timeout for long podcasts
+      env: { ...process.env, OMP_NUM_THREADS: '4' },
+    });
+
+    if (!result.ok) {
+      console.error('faster-whisper failed:', result.stderr);
+      return null;
+    }
+
+    return result.stdout.trim() || null;
+  } catch (error) {
+    console.error('Error transcribing with faster-whisper:', error);
+    return null;
+  }
+}
+
+/**
+ * Transcribe audio file using the best available method
+ */
+export async function transcribeAudioFile(audioPath: string): Promise<string | null> {
+  const method = await getTranscriptionMethod();
+
+  if (!method) {
+    console.error('No transcription method available');
+    return null;
+  }
+
+  console.log(`Using transcription method: ${method}`);
+
+  if (method === 'mlx_whisper') {
+    return await transcribeWithMlxWhisper(audioPath);
+  } else if (method === 'faster-whisper') {
+    return await transcribeWithFasterWhisper(audioPath);
+  }
+
+  return null;
 }
 
 /**
@@ -328,14 +386,135 @@ export async function transcribePodcast(
   }
 }
 
+// ============== Transcription Method Detection ==============
+
+type TranscriptionMethod = 'mlx_whisper' | 'faster-whisper' | null;
+
+type RunResult = { ok: boolean; code: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string };
+type RunOptions = { env?: NodeJS.ProcessEnv; timeoutMs?: number };
+
+async function runCommand(cmd: string, args: string[], opts: RunOptions = {}): Promise<RunResult> {
+  return await new Promise<RunResult>((resolve) => {
+    let settled = false;
+    const child = spawn(cmd, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: opts.env,
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.setEncoding('utf-8');
+    child.stderr.setEncoding('utf-8');
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+
+    const timeoutMs = opts.timeoutMs ?? 0;
+    const timer =
+      timeoutMs > 0
+        ? setTimeout(() => {
+            try {
+              child.kill('SIGKILL');
+            } catch {}
+          }, timeoutMs)
+        : null;
+
+    child.on('close', (code, signal) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve({
+        ok: code === 0 && signal == null,
+        code,
+        signal: signal as any,
+        stdout,
+        stderr,
+      });
+    });
+
+    child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve({
+        ok: false,
+        code: null,
+        signal: null,
+        stdout,
+        stderr: `${stderr}${stderr ? '\n' : ''}${String(err)}`,
+      });
+    });
+  });
+}
+
+let cachedMethod: TranscriptionMethod | undefined;
+let methodCheck: Promise<TranscriptionMethod> | null = null;
+
 /**
- * Check if mlx-whisper is available
+ * Check which transcription method is available
+ */
+export async function getTranscriptionMethod(): Promise<TranscriptionMethod> {
+  if (cachedMethod !== undefined) return cachedMethod;
+  if (methodCheck) return await methodCheck;
+
+  methodCheck = (async () => {
+    // On macOS, prefer mlx_whisper (Apple Silicon optimized)
+    if (platform() === 'darwin') {
+      try {
+        const result = await runCommand('which', ['mlx_whisper'], { timeoutMs: 2000 });
+        if (result.ok && result.stdout.trim()) {
+          cachedMethod = 'mlx_whisper';
+          return 'mlx_whisper';
+        }
+      } catch {}
+    }
+
+    // Check for faster-whisper in venv (Linux VPS)
+    const venvPython = join(homedir(), 'whisper-venv', 'bin', 'python');
+    if (existsSync(venvPython)) {
+      try {
+        const result = await runCommand(venvPython, ['-c', 'import faster_whisper'], { timeoutMs: 5000 });
+        if (result.ok) {
+          cachedMethod = 'faster-whisper';
+          return 'faster-whisper';
+        }
+      } catch {}
+    }
+
+    cachedMethod = null;
+    return null;
+  })();
+
+  try {
+    return await methodCheck;
+  } finally {
+    methodCheck = null;
+  }
+}
+
+/**
+ * Check if any whisper transcription method is available (legacy compatibility)
  */
 export function isWhisperAvailable(): boolean {
-  try {
-    execSync('which mlx_whisper', { stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
+  // This is a sync check - returns true if we've cached a method
+  // For proper async checking, use getTranscriptionMethod()
+  if (cachedMethod !== undefined) return cachedMethod !== null;
+
+  // Sync fallback: check mlx_whisper on macOS
+  if (platform() === 'darwin') {
+    try {
+      const { execSync } = require('child_process');
+      execSync('which mlx_whisper', { stdio: 'pipe' });
+      return true;
+    } catch {}
   }
+
+  // Check for faster-whisper venv
+  const venvPython = join(homedir(), 'whisper-venv', 'bin', 'python');
+  return existsSync(venvPython);
 }

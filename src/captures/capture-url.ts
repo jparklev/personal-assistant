@@ -1,5 +1,5 @@
 import { saveCapture, detectContentType, type CaptureMetadata } from './index';
-import { transcribePodcast, isWhisperAvailable } from '../podcast/transcribe';
+import { transcribePodcast, getTranscriptionMethod } from '../podcast/transcribe';
 import { transcribeYoutube } from './youtube';
 
 function decodeHtmlEntities(s: string): string {
@@ -52,8 +52,9 @@ export async function captureUrlToFile(
   const capturedAt = new Date().toISOString();
 
   if (type === 'podcast') {
-    if (!isWhisperAvailable()) return { success: false, error: 'mlx_whisper not available' };
-    progress('Fetching audio + transcribing podcast…');
+    const transcriptionMethod = await getTranscriptionMethod();
+    if (!transcriptionMethod) return { success: false, error: 'No transcription method available (need mlx_whisper or faster-whisper)' };
+    progress(`Fetching audio + transcribing podcast (using ${transcriptionMethod})…`);
     const res = await transcribePodcast(url, progress);
     if (!res.success || !res.transcript) return { success: false, error: res.error || 'Podcast transcription failed' };
 
