@@ -75,6 +75,7 @@ Task:
       '-p',
       '--dangerously-skip-permissions',
       '--output-format', 'stream-json',
+      '--verbose',
     ], {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -89,6 +90,12 @@ Task:
 
     proc.stdin.write(prompt);
     proc.stdin.end();
+
+    // Log stderr for debugging
+    const stderrRl = createInterface({ input: proc.stderr });
+    stderrRl.on('line', (line) => {
+      if (line.trim()) console.error('[GitSync] Claude stderr:', line);
+    });
 
     const rl = createInterface({ input: proc.stdout });
 

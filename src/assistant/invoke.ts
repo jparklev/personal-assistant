@@ -67,7 +67,7 @@ export function buildAssistantContext(opts: {
       `- Assistant dir: ${cfg.assistantDir}`,
       `- Captures dir: ~/.assistant/captures/`,
       '',
-      `Use tools (Read/Glob/Grep) when you need details; avoid guessing.`,
+      `Use tools (Read/Glob/Grep/git/gh) when you need details; avoid guessing.`,
     ].join('\n')
   );
 
