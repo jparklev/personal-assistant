@@ -2,7 +2,7 @@ import { execSync } from 'child_process';
 import { mkdirSync, readdirSync, statSync, unlinkSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { transcribeAudioFile, isWhisperAvailable } from '../podcast/transcribe';
+import { transcribeAudioFile, getTranscriptionMethod } from '../podcast/transcribe';
 
 const TEMP_DIR = join(tmpdir(), 'youtube-transcribe');
 
@@ -45,8 +45,9 @@ export async function transcribeYoutube(
   if (!isYtDlpAvailable()) {
     return { success: false, error: 'yt-dlp not found on PATH' };
   }
-  if (!isWhisperAvailable()) {
-    return { success: false, error: 'mlx_whisper not found on PATH' };
+  const transcriptionMethod = await getTranscriptionMethod();
+  if (!transcriptionMethod) {
+    return { success: false, error: 'No transcription method available (need mlx_whisper or faster-whisper)' };
   }
 
   mkdirSync(TEMP_DIR, { recursive: true });
@@ -82,7 +83,7 @@ export async function transcribeYoutube(
     return { success: false, error: 'Downloaded audio file not found' };
   }
 
-  progress('Transcribing with mlx-whisper (this may take a while)...');
+  progress(`Transcribing with ${transcriptionMethod} (this may take a while)...`);
   let transcript: string | null = null;
   try {
     transcript = await transcribeAudioFile(audioPath);
