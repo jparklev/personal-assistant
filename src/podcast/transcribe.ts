@@ -281,12 +281,12 @@ async function transcribeWithFasterWhisper(audioPath: string): Promise<string | 
   try {
     console.log(`Transcribing ${audioPath} with faster-whisper...`);
 
-    // Use 'base' model for speed on VPS, beam_size=5 for accuracy
+    // Use 'tiny' model to fit in limited VPS RAM, beam_size=1 for memory efficiency
     const script = [
       'import sys',
       'from faster_whisper import WhisperModel',
-      "model = WhisperModel('base', device='cpu', compute_type='int8')",
-      'segments, _ = model.transcribe(sys.argv[1], beam_size=5)',
+      "model = WhisperModel('tiny', device='cpu', compute_type='int8')",
+      'segments, _ = model.transcribe(sys.argv[1], beam_size=1)',
       "print(' '.join(s.text.strip() for s in segments))",
     ].join('\n');
 
