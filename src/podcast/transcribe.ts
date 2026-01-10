@@ -10,7 +10,7 @@
  */
 
 import { spawn, execSync } from 'child_process';
-import { existsSync, unlinkSync, mkdirSync, readFileSync } from 'fs';
+import { existsSync, unlinkSync, mkdirSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir, homedir, platform } from 'os';
 
@@ -273,34 +273,121 @@ async function transcribeWithMlxWhisper(audioPath: string): Promise<string | nul
 }
 
 /**
+ * Get audio duration in seconds using ffprobe
+ */
+function getAudioDuration(audioPath: string): number {
+  try {
+    const result = execSync(
+      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${audioPath}"`,
+      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+    );
+    return parseFloat(result.trim()) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Transcribe a single audio chunk with faster-whisper
+ */
+async function transcribeChunk(venvPython: string, chunkPath: string): Promise<string | null> {
+  const script = [
+    'import sys',
+    'from faster_whisper import WhisperModel',
+    "model = WhisperModel('tiny', device='cpu', compute_type='int8')",
+    'segments, _ = model.transcribe(sys.argv[1], beam_size=1)',
+    "print(' '.join(s.text.strip() for s in segments))",
+  ].join('\n');
+
+  const result = await runCommand(venvPython, ['-c', script, chunkPath], {
+    timeoutMs: 600000, // 10 min per chunk
+    env: { ...process.env, OMP_NUM_THREADS: '2' }, // Limit threads to reduce memory
+  });
+
+  if (!result.ok) {
+    console.error('Chunk transcription failed:', result.stderr);
+    return null;
+  }
+
+  return result.stdout.trim() || null;
+}
+
+/**
  * Transcribe audio file using faster-whisper (Linux/VPS)
+ * For long audio (>10min), splits into chunks to avoid OOM on memory-constrained VPS
  */
 async function transcribeWithFasterWhisper(audioPath: string): Promise<string | null> {
   const venvPython = join(homedir(), 'whisper-venv', 'bin', 'python');
+  const CHUNK_DURATION = 600; // 10 minutes per chunk
 
   try {
-    console.log(`Transcribing ${audioPath} with faster-whisper...`);
+    const duration = getAudioDuration(audioPath);
+    console.log(`Audio duration: ${(duration / 60).toFixed(1)} minutes`);
 
-    // Use 'base' model for speed on VPS, beam_size=5 for accuracy
-    const script = [
-      'import sys',
-      'from faster_whisper import WhisperModel',
-      "model = WhisperModel('base', device='cpu', compute_type='int8')",
-      'segments, _ = model.transcribe(sys.argv[1], beam_size=5)',
-      "print(' '.join(s.text.strip() for s in segments))",
-    ].join('\n');
+    // For short audio, transcribe directly
+    if (duration <= CHUNK_DURATION) {
+      console.log(`Transcribing ${audioPath} with faster-whisper...`);
+      return await transcribeChunk(venvPython, audioPath);
+    }
 
-    const result = await runCommand(venvPython, ['-c', script, audioPath], {
-      timeoutMs: 1800000, // 30 minute timeout for long podcasts
-      env: { ...process.env, OMP_NUM_THREADS: '4' },
-    });
+    // For long audio, split into chunks to avoid OOM
+    console.log(`Long audio detected. Splitting into ${Math.ceil(duration / CHUNK_DURATION)} chunks...`);
 
-    if (!result.ok) {
-      console.error('faster-whisper failed:', result.stderr);
+    const chunkPrefix = `chunk-${Date.now()}`;
+    const chunkPattern = join(TEMP_DIR, `${chunkPrefix}-%03d.mp3`);
+
+    try {
+      // Split audio into 10-minute chunks
+      execSync(
+        `ffmpeg -i "${audioPath}" -f segment -segment_time ${CHUNK_DURATION} -c copy "${chunkPattern}"`,
+        { stdio: 'pipe', timeout: 300000 }
+      );
+    } catch (e) {
+      console.error('Failed to split audio:', e);
+      // Fall back to direct transcription (might OOM)
+      return await transcribeChunk(venvPython, audioPath);
+    }
+
+    // Find all chunk files
+    const chunks = readdirSync(TEMP_DIR)
+      .filter(f => f.startsWith(chunkPrefix) && f.endsWith('.mp3'))
+      .sort()
+      .map(f => join(TEMP_DIR, f));
+
+    if (chunks.length === 0) {
+      console.error('No chunks created');
+      return await transcribeChunk(venvPython, audioPath);
+    }
+
+    console.log(`Created ${chunks.length} chunks. Transcribing sequentially...`);
+    const transcripts: string[] = [];
+
+    for (let i = 0; i < chunks.length; i++) {
+      const chunkPath = chunks[i];
+      console.log(`Transcribing chunk ${i + 1}/${chunks.length}...`);
+
+      const transcript = await transcribeChunk(venvPython, chunkPath);
+
+      // Clean up chunk immediately after transcription
+      try { unlinkSync(chunkPath); } catch {}
+
+      if (transcript) {
+        transcripts.push(transcript);
+      } else {
+        console.error(`Chunk ${i + 1} failed, continuing...`);
+      }
+
+      // Brief pause between chunks to let memory settle
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    if (transcripts.length === 0) {
+      console.error('All chunks failed');
       return null;
     }
 
-    return result.stdout.trim() || null;
+    console.log(`Transcribed ${transcripts.length}/${chunks.length} chunks successfully`);
+    return transcripts.join(' ');
   } catch (error) {
     console.error('Error transcribing with faster-whisper:', error);
     return null;
@@ -308,24 +395,125 @@ async function transcribeWithFasterWhisper(audioPath: string): Promise<string | 
 }
 
 /**
+ * Transcribe audio file using OpenAI Whisper API
+ * Used as fallback when local methods fail (e.g., OOM on VPS)
+ */
+async function transcribeWithOpenAI(audioPath: string): Promise<string | null> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    console.error('OPENAI_API_KEY not set');
+    return null;
+  }
+
+  try {
+    // Check file size - OpenAI limit is 25MB
+    const stats = require('fs').statSync(audioPath);
+    const fileSizeMB = stats.size / (1024 * 1024);
+    console.log(`Audio file size: ${fileSizeMB.toFixed(1)}MB`);
+
+    let uploadPath = audioPath;
+
+    // If file is too large, compress it with ffmpeg
+    if (fileSizeMB > 24) {
+      console.log('File too large for OpenAI API, compressing with ffmpeg...');
+      const compressedPath = audioPath.replace(/\.[^.]+$/, '_compressed.mp3');
+
+      try {
+        // Compress to mono 64kbps - should get ~0.5MB/min
+        execSync(
+          `ffmpeg -y -i "${audioPath}" -ac 1 -ab 64k -ar 16000 "${compressedPath}"`,
+          { stdio: 'pipe', timeout: 300000 }
+        );
+
+        if (existsSync(compressedPath)) {
+          const compressedStats = require('fs').statSync(compressedPath);
+          console.log(`Compressed to ${(compressedStats.size / (1024 * 1024)).toFixed(1)}MB`);
+          uploadPath = compressedPath;
+        }
+      } catch (e) {
+        console.error('ffmpeg compression failed:', e);
+        // Continue with original file, might still work
+      }
+    }
+
+    console.log('Uploading to OpenAI Whisper API...');
+
+    // Create form data for multipart upload
+    const FormData = (await import('form-data')).default;
+    const form = new FormData();
+    form.append('file', require('fs').createReadStream(uploadPath));
+    form.append('model', 'whisper-1');
+    form.append('response_format', 'text');
+
+    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        ...form.getHeaders(),
+      },
+      body: form as any,
+    });
+
+    // Clean up compressed file if we made one
+    if (uploadPath !== audioPath && existsSync(uploadPath)) {
+      unlinkSync(uploadPath);
+    }
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('OpenAI API error:', response.status, error);
+      return null;
+    }
+
+    const transcript = await response.text();
+    console.log('OpenAI transcription complete');
+    return transcript.trim() || null;
+  } catch (error) {
+    console.error('Error transcribing with OpenAI:', error);
+    return null;
+  }
+}
+
+/**
+ * Check if OpenAI API is available as fallback
+ */
+function isOpenAIAvailable(): boolean {
+  return !!process.env.OPENAI_API_KEY;
+}
+
+/**
  * Transcribe audio file using the best available method
+ * Tries local methods first, falls back to OpenAI API if local fails
  */
 export async function transcribeAudioFile(audioPath: string): Promise<string | null> {
   const method = await getTranscriptionMethod();
 
-  if (!method) {
-    console.error('No transcription method available');
-    return null;
+  // Try local transcription first
+  if (method) {
+    console.log(`Using transcription method: ${method}`);
+
+    let result: string | null = null;
+
+    if (method === 'mlx_whisper') {
+      result = await transcribeWithMlxWhisper(audioPath);
+    } else if (method === 'faster-whisper') {
+      result = await transcribeWithFasterWhisper(audioPath);
+    }
+
+    if (result) {
+      return result;
+    }
+
+    console.log('Local transcription failed, checking for OpenAI fallback...');
   }
 
-  console.log(`Using transcription method: ${method}`);
-
-  if (method === 'mlx_whisper') {
-    return await transcribeWithMlxWhisper(audioPath);
-  } else if (method === 'faster-whisper') {
-    return await transcribeWithFasterWhisper(audioPath);
+  // Fall back to OpenAI API if available
+  if (isOpenAIAvailable()) {
+    console.log('Falling back to OpenAI Whisper API...');
+    return await transcribeWithOpenAI(audioPath);
   }
 
+  console.error('No transcription method available');
   return null;
 }
 
