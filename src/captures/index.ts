@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync } from 
 import { join } from 'path';
 import { homedir } from 'os';
 import { parseFrontmatter } from '../utils/frontmatter';
+import { isoDateForAssistant } from '../time';
 
 export const CAPTURES_DIR = join(homedir(), '.assistant', 'captures');
 
@@ -121,10 +122,14 @@ export function generateFrontmatter(meta: CaptureMetadata): string {
 /**
  * Save captured content to a file
  */
-export function saveCapture(meta: CaptureMetadata, content: string): CaptureResult {
+export function saveCapture(
+  meta: CaptureMetadata,
+  content: string,
+  opts?: { now?: Date }
+): CaptureResult {
   ensureCapturesDir();
 
-  const date = new Date().toISOString().split('T')[0];
+  const date = isoDateForAssistant(opts?.now || new Date());
   const filename = `${date}-${safeFilename(meta.title)}.md`;
   const filePath = join(CAPTURES_DIR, filename);
 

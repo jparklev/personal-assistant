@@ -13,7 +13,7 @@ import type { AppConfig } from '../config';
 import type { StateStore } from '../state';
 import { buildAssistantContext } from '../assistant/invoke';
 import { buildHealthContext, recordUserResponse } from '../health';
-import { isoDateInTimeZone } from '../time';
+import { DEFAULT_TIME_ZONE, formatTimeInTimeZone, isoDateForAssistant } from '../time';
 import { requestVaultSync } from '../vault/sync-queue';
 import { invokeClaude, type RunnerEvent } from '../assistant/runner';
 import { storeSession, getSession, setSessionMetadata, getSessionMetadata } from '../assistant/sessions';
@@ -639,39 +639,49 @@ async function runAssistantTurn(
 
   await task.requestRender();
 
+  const at = message.createdAt || new Date();
+  const assistantDate = isoDateForAssistant(at);
+  const timeStr = formatTimeInTimeZone(at, DEFAULT_TIME_ZONE);
+  const timeContext = `## Time Context\n\n- User timezone: ${DEFAULT_TIME_ZONE} (Pacific)\n- Message time: ${timeStr} PT\n- Effective date for notes/files: ${assistantDate} (00:00–04:59 PT counts as previous day)\n\n`;
+  const vaultVoice =
+    `When writing/editing anything in the Obsidian vault, write in Josh's voice (first-person, casual). ` +
+    `Never refer to Josh in third person.`;
+
   // Build the prompt - health channel gets specialized context
   let prompt: string;
 
   if (resumeId) {
     // For resumed sessions, add channel-specific reminders
     if (channelType === 'blips') {
-      const today = isoDateInTimeZone(new Date());
       const blipsDir = `${ctx.cfg.vaultPath}/Blips`;
-      prompt = `${channelContext}${text}
+      prompt = `${channelContext}${timeContext}## Current User Message\n\n${text}
 
 **Reminder**: This is a #blips conversation. If Josh shares new thoughts or insights, UPDATE the blip file:
 - Append to the **Notes** section
-- Add to **Log**: \`- **${today}**: [summary]\`
-- Update \`touched: ${today}\` in frontmatter
-- Blips are in: ${blipsDir}/`;
+- Add to **Log**: \`- **${assistantDate}**: [summary]\`
+- Update \`touched: ${assistantDate}\` in frontmatter
+- Blips are in: ${blipsDir}/
+
+${vaultVoice}`;
     } else if (channelType === 'health') {
-      const today = isoDateInTimeZone(new Date());
-      prompt = `${channelContext}${text}
+      prompt = `${channelContext}${timeContext}## Current User Message\n\n${text}
 
 **Reminder**: This is a #health conversation. Log any health info to the vault:
 - Supplements → \`Health & Wellness/Supplements/Log.md\`
-- Symptoms/energy → \`Daily/${today}.md\` under \`## Health\``;
+- Symptoms/energy → \`Daily/${assistantDate}.md\` under \`## Health\`
+
+${vaultVoice}`;
     } else {
-      prompt = `${channelContext}${text}`;
+      prompt = `${channelContext}${timeContext}## Current User Message\n\n${text}\n\n${vaultVoice}`;
     }
   } else if (channelType === 'health') {
     // Health channel gets full health context and vault access
-    const healthContext = buildHealthContext(ctx.cfg.vaultPath);
+    const healthContext = buildHealthContext(ctx.cfg.vaultPath, { now: at });
     prompt = `You are Josh's health assistant responding in the #health Discord channel.
 
 ${healthContext}
 
-${channelContext}${conversationContext}## Current User Message
+${channelContext}${conversationContext}${timeContext}## Current User Message
 
 ${text}
 
@@ -680,9 +690,11 @@ ${text}
 You have access to Josh's full health context in the vault. Use the Read, Edit, and Write tools to:
 - Read health files for details (don't guess - look it up)
 - Append supplement logs to \`Health & Wellness/Supplements/Log.md\`
-- Append symptoms/energy to \`Daily/${isoDateInTimeZone(new Date())}.md\` under a \`## Health\` section
+- Append symptoms/energy to \`Daily/${assistantDate}.md\` under a \`## Health\` section
 
 When logging, use formats consistent with existing entries. Check the files first if unsure.
+
+${vaultVoice}
 
 Style:
 - Concise, not verbose
@@ -693,7 +705,6 @@ Style:
 Output your response message directly.`;
   } else if (channelType === 'blips') {
     // Blips channel - capture ideas and URLs as blip files
-    const today = isoDateInTimeZone(new Date());
     const capturesDir = `${process.env.HOME}/.assistant/captures`;
     const blipsDir = `${ctx.cfg.vaultPath}/Blips`;
 
@@ -701,7 +712,7 @@ Output your response message directly.`;
 
 Blips are small noticings, ideas, and interesting links captured for later development.
 
-${channelContext}${conversationContext}## Current User Message
+${channelContext}${conversationContext}${timeContext}## Current User Message
 
 ${text}
 
@@ -718,28 +729,28 @@ If you create a file without proper YAML frontmatter starting with \`---\`, the 
 
 ### If a URL is shared (with or without commentary):
 1. Use WebFetch with this exact prompt: "Return the COMPLETE article/page content as markdown. Preserve ALL text, headings, quotes, code blocks, and formatting. Do not summarize or truncate. Include the title and author if present."
-2. Create a capture file at \`${capturesDir}/${today}-SLUG.md\` containing:
+2. Create a capture file at \`${capturesDir}/${assistantDate}-SLUG.md\` containing:
    - The URL as a header
    - The full WebFetch response (the complete article content)
-3. Create a blip file at \`${blipsDir}/${today}-SLUG.md\` with this format:
+3. Create a blip file at \`${blipsDir}/${assistantDate}-SLUG.md\` with this format:
 
 \`\`\`markdown
 ---
 title: [Page title or descriptive title]
 status: active
-created: ${today}
-touched: ${today}
+created: ${assistantDate}
+touched: ${assistantDate}
 tags: []
 related: []
 source: "[the URL]"
-capture: ${today}-SLUG.md
+capture: ${assistantDate}-SLUG.md
 ---
 
 [1-2 sentence summary of what this is about]
 
 ## Capture
 
-- Full capture: ~/.assistant/captures/${today}-SLUG.md
+- Full capture: ~/.assistant/captures/${assistantDate}-SLUG.md
 
 ## Notes
 
@@ -747,7 +758,7 @@ capture: ${today}-SLUG.md
 
 ## Log
 
-- **${today}**: Captured from #blips
+- **${assistantDate}**: Captured from #blips
 \`\`\`
 
 **FORMAT IS MANDATORY**: The YAML frontmatter (between ---) and sections (## Capture, ## Notes, ## Log) are required. Do not create free-form markdown or custom sections.
@@ -755,14 +766,14 @@ capture: ${today}-SLUG.md
 **Important**: If Josh shares thoughts alongside a URL (e.g., "https://example.com - this reminds me of X"), capture those thoughts in the Notes section. His commentary is valuable context.
 
 ### If text/idea is shared (no URL):
-Create a blip file at \`${blipsDir}/${today}-SLUG.md\` (no capture file needed):
+Create a blip file at \`${blipsDir}/${assistantDate}-SLUG.md\` (no capture file needed):
 
 \`\`\`markdown
 ---
 title: [Descriptive title for the idea]
 status: active
-created: ${today}
-touched: ${today}
+created: ${assistantDate}
+touched: ${assistantDate}
 tags: []
 related: []
 ---
@@ -775,7 +786,7 @@ related: []
 
 ## Log
 
-- **${today}**: Captured from #blips
+- **${assistantDate}**: Captured from #blips
 \`\`\`
 
 ### SLUG format:
@@ -793,8 +804,8 @@ Ask 1-2 thought-provoking questions to help develop the idea:
 
 When Josh responds with more thoughts, insights, or answers to your questions:
 1. Use Edit to UPDATE the blip file - append his new thoughts to the **Notes** section
-2. Add a timestamped entry to the **Log** section: \`- **${today}**: [brief summary of what was added]\`
-3. Update the \`touched\` date in frontmatter to \`${today}\`
+2. Add a timestamped entry to the **Log** section: \`- **${assistantDate}**: [brief summary of what was added]\`
+3. Update the \`touched\` date in frontmatter to \`${assistantDate}\`
 4. Continue developing the idea with another question if appropriate
 
 The goal is to evolve the blip through conversation - each exchange adds value to the captured idea.
@@ -804,13 +815,15 @@ Style:
 - Curious, help develop the idea
 - No emojis
 
+${vaultVoice}
+
 Output your response directly.`;
   } else {
     prompt = `You are the personal assistant responding in the ${channelType} Discord channel.
 
 ${buildAssistantContext()}
 
-${channelContext}${conversationContext}## Current User Message
+${channelContext}${conversationContext}${timeContext}## Current User Message
 
 ${text}
 
@@ -826,6 +839,8 @@ Respond as a thoughtful personal assistant. Remember:
 - You have FULL CONTEXT of the conversation above - reference it naturally
 
 If the user shares something you should remember, note it. If they correct you, acknowledge it.
+
+${vaultVoice}
 
 Output ONLY your response message, nothing else.`;
   }
@@ -893,8 +908,7 @@ Output ONLY your response message, nothing else.`;
       // Sync vault if file-modifying tools were used (especially for health channel)
       const fileTools = ['Edit', 'Write', 'NotebookEdit', 'MultiEdit'];
       if (result.toolsUsed.some((t) => fileTools.includes(t))) {
-        const today = isoDateInTimeZone(new Date());
-        const commitMsg = channelType === 'health' ? `health: ${today}` : `assistant: ${today}`;
+        const commitMsg = channelType === 'health' ? `health: ${assistantDate}` : `assistant: ${assistantDate}`;
         requestVaultSync(ctx.cfg.vaultPath, commitMsg);
       }
     } else {

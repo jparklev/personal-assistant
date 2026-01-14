@@ -7,7 +7,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
-import { isoDateInTimeZone } from '../time';
+import { isoDateForAssistant } from '../time';
 
 export interface HealthState {
   lastCheckinSent: string | null; // ISO date
@@ -58,7 +58,7 @@ export function writeHealthState(state: Partial<HealthState>): void {
  * Record that a check-in was sent.
  */
 export function recordCheckinSent(): void {
-  const today = isoDateInTimeZone(new Date());
+  const today = isoDateForAssistant(new Date());
   const state = readHealthState();
 
   writeHealthState({
@@ -77,7 +77,7 @@ export function recordCheckinSent(): void {
  */
 export function recordUserResponse(): void {
   writeHealthState({
-    lastUserResponse: isoDateInTimeZone(new Date()),
+    lastUserResponse: isoDateForAssistant(new Date()),
     consecutiveNoResponse: 0,
   });
 }
@@ -91,7 +91,7 @@ export function recordUserResponse(): void {
  */
 export function shouldSendCheckin(): { send: boolean; reason: string } {
   const state = readHealthState();
-  const today = isoDateInTimeZone(new Date());
+  const today = isoDateForAssistant(new Date());
 
   // Already sent today
   if (state.lastCheckinSent === today) {
@@ -125,7 +125,7 @@ export function shouldSendCheckin(): { send: boolean; reason: string } {
 export function getDaysSinceLastLog(lastLogDate: string | null): number | null {
   if (!lastLogDate) return null;
 
-  const today = isoDateInTimeZone(new Date());
+  const today = isoDateForAssistant(new Date());
   const last = new Date(lastLogDate);
   const now = new Date(today);
 

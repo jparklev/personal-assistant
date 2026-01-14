@@ -10,6 +10,7 @@ import { join, basename } from 'path';
 import { loadConfig } from '../config';
 import { parseFrontmatter, serializeFrontmatter } from '../utils/frontmatter';
 import type { BlipFrontmatter, BlipSummary, Blip, BlipStatus } from './types';
+import { isoDateForAssistant } from '../time';
 
 const config = loadConfig();
 
@@ -79,7 +80,7 @@ function slugify(title: string): string {
  * Get today's date as YYYY-MM-DD
  */
 function today(): string {
-  return new Date().toISOString().split('T')[0];
+  return isoDateForAssistant(new Date());
 }
 
 /**
@@ -166,6 +167,7 @@ export interface CreateBlipOptions {
   tags?: string[];
   capture?: string;
   logEntry?: string;
+  now?: Date;
 }
 
 /**
@@ -191,7 +193,7 @@ function uniqueFilename(baseFilename: string): string {
 export function createBlip(options: CreateBlipOptions): string {
   ensureBlipsDir();
 
-  const date = today();
+  const date = options.now ? isoDateForAssistant(options.now) : today();
   let slug = slugify(options.title);
 
   // Handle empty slug

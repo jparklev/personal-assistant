@@ -13,6 +13,7 @@ import { buildAssistantContext } from '../../assistant/invoke';
 import { invokeClaude, type RunnerEvent } from '../../assistant/runner';
 import { storeSession, setSessionMetadata } from '../../assistant/sessions';
 import { ProgressRenderer } from '../../assistant/progress';
+import { formatTimeInTimeZone, isoDateForAssistant } from '../../time';
 
 const PROGRESS_EDIT_EVERY_MS = 2000;
 
@@ -112,6 +113,10 @@ async function handleBlipDiscussion(
   ctx: AppContext,
   text: string
 ): Promise<void> {
+  const at = message.createdAt || new Date();
+  const date = isoDateForAssistant(at);
+  const timeStr = formatTimeInTimeZone(at);
+
   const progressRenderer = new ProgressRenderer();
   const initialProgress = progressRenderer.render('thinking', 0, 'claude', 'thinking');
   const progressMsg = await message.reply(wrapProgress(initialProgress));
@@ -151,6 +156,12 @@ async function handleBlipDiscussion(
 ${text}
 ---
 
+## Time Context
+
+- User timezone: America/Los_Angeles (Pacific)
+- Message time: ${timeStr} PT
+- Effective date for filenames/logs: ${date} (00:00–04:59 PT counts as previous day)
+
 ${buildAssistantContext()}
 
 ## Your Role
@@ -175,8 +186,8 @@ This is an idea or thought the user shared. Blips are stored as markdown files i
 ---
 title: "Descriptive title"
 status: active
-created: YYYY-MM-DD
-touched: YYYY-MM-DD
+created: ${date}
+touched: ${date}
 tags: [relevant, tags]
 related: []
 ---
@@ -185,10 +196,12 @@ The idea or thought
 
 ## Log
 
-- **YYYY-MM-DD**: Captured from Discord
+- **${date}**: Captured from Discord
 \`\`\`
 
-**File naming:** \`YYYY-MM-DD-slug-from-title.md\`
+**File naming:** \`${date}-slug-from-title.md\`
+
+When writing or editing anything in the Obsidian vault, write in Josh's voice (first-person, casual). Never write about Josh in third person.
 
 Keep responses concise.`;
 
@@ -241,6 +254,7 @@ async function handleUrlCapture(
   text: string,
   urls: string[]
 ): Promise<void> {
+  const at = message.createdAt || new Date();
   const force = /\bforce\b/i.test(text);
   const duplicates: Array<{ url: string; existingFilename: string }> = [];
   const urlsToCapture: string[] = [];
@@ -283,7 +297,7 @@ async function handleUrlCapture(
 
   for (const url of urlsToCapture) {
     try {
-      const captured = await captureUrlToFile(url, updateProgress);
+      const captured = await captureUrlToFile(url, updateProgress, { now: at });
       if (captured.success) {
         captureResults.push({
           url,
@@ -347,6 +361,7 @@ async function handleUrlCapture(
       author: primary.author,
       capture: captureField,
       logEntry: 'Captured from Discord',
+      now: at,
     });
 
     const filename = blipPath.split('/').pop() || blipPath;

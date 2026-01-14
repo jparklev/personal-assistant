@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, join } from 'path';
 import type { Flashcard, FlashcardDeck, ReviewRating } from './types';
 import { calculateNextReview, createFlashcard } from './types';
+import { isoDateForAssistant } from '../time';
 
 let deckPath: string | null = null;
 let cachedDeck: FlashcardDeck | null = null;
@@ -66,7 +67,7 @@ export function getAllCards(): Flashcard[] {
  * Get cards due for review today (or overdue).
  */
 export function getDueCards(): Flashcard[] {
-  const today = new Date().toISOString().split('T')[0];
+  const today = isoDateForAssistant(new Date());
   const deck = loadDeck();
 
   return deck.cards
@@ -139,7 +140,7 @@ export function reviewCard(id: string, rating: ReviewRating): Flashcard | null {
   const updatedCard: Flashcard = {
     ...card,
     ...updates,
-    lastReviewed: new Date().toISOString().split('T')[0],
+    lastReviewed: isoDateForAssistant(new Date()),
   };
 
   deck.cards[cardIndex] = updatedCard;
@@ -175,7 +176,7 @@ export function getDeckStats(): {
   mature: number;
 } {
   const deck = loadDeck();
-  const today = new Date().toISOString().split('T')[0];
+  const today = isoDateForAssistant(new Date());
 
   let due = 0;
   let newCards = 0;

@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
+import { isoDateForAssistant } from '../time';
 
 const WRITABLE_FOLDERS = ['Note Inbox.md', 'Daily/', 'Drafts/'];
 
@@ -69,8 +70,8 @@ export class VaultWriter {
 
   // Append to today's daily note
   appendToToday(content: string): boolean {
-    const today = new Date().toISOString().split('T')[0];
-    return this.append(`Daily/${today}.md`, content);
+    const date = isoDateForAssistant(new Date());
+    return this.append(`Daily/${date}.md`, content);
   }
 
   // Add item to Note Inbox

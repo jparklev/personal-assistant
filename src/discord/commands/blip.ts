@@ -13,6 +13,7 @@ import {
 } from '../../blips';
 import { buildAssistantContext } from '../../assistant/invoke';
 import { invokeClaude } from '../../assistant/runner';
+import { addDaysIsoDate, isoDateForAssistant } from '../../time';
 
 /**
  * Handle /blip slash command and its subcommands.
@@ -64,6 +65,7 @@ async function handleCapture(interaction: ChatInputCommandInteraction): Promise<
     title,
     content,
     logEntry: 'Captured from Discord',
+    now: interaction.createdAt,
   });
 
   const filename = path.split('/').pop() || path;
@@ -189,9 +191,9 @@ async function handleSnooze(interaction: ChatInputCommandInteraction): Promise<v
     return;
   }
 
-  const until = new Date();
-  until.setDate(until.getDate() + days);
-  snoozeBlip(summary.path, until.toISOString().split('T')[0]);
+  const today = isoDateForAssistant(interaction.createdAt);
+  const until = addDaysIsoDate(today, days);
+  snoozeBlip(summary.path, until);
   await interaction.reply({
     content: `Snoozed **${summary.title}** for ${days} days`,
     ephemeral: false,

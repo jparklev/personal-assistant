@@ -7,7 +7,7 @@
 
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { isoDateInTimeZone } from '../time';
+import { isoDateForAssistant } from '../time';
 import { getDaysSinceLastLog } from './state';
 
 export interface ProtocolState {
@@ -24,8 +24,9 @@ export interface ProtocolState {
  * Parse the Sulfur Roadmap Tracking file for protocol state.
  * Returns { active: false } if no active protocol or file not found.
  */
-export function getProtocolState(vaultPath: string): ProtocolState {
+export function getProtocolState(vaultPath: string, opts?: { now?: Date }): ProtocolState {
   const trackingPath = join(vaultPath, 'Health & Wellness', 'Sulfur Roadmap Tracking.md');
+  const at = opts?.now || new Date();
 
   if (!existsSync(trackingPath)) {
     return { active: false };
@@ -41,13 +42,13 @@ export function getProtocolState(vaultPath: string): ProtocolState {
     }
 
     const startDate = startMatch[1];
-    const today = isoDateInTimeZone(new Date());
+    const today = isoDateForAssistant(at);
     const start = new Date(startDate);
-    const now = new Date(today);
+    const todayDate = new Date(today);
 
     // Calculate day number (1-indexed)
     const msPerDay = 24 * 60 * 60 * 1000;
-    const dayNumber = Math.floor((now.getTime() - start.getTime()) / msPerDay) + 1;
+    const dayNumber = Math.floor((todayDate.getTime() - start.getTime()) / msPerDay) + 1;
 
     // Determine phase based on day number
     // Phase 1: Days 1-30 (Low Sulfur Diet)
@@ -121,10 +122,11 @@ export function getLastSupplementLogDate(vaultPath: string): string | null {
  * This gives Claude just enough to understand the current state.
  * Claude is trusted to Read files from the vault for details.
  */
-export function buildHealthContext(vaultPath: string): string {
-  const protocol = getProtocolState(vaultPath);
+export function buildHealthContext(vaultPath: string, opts?: { now?: Date }): string {
+  const at = opts?.now || new Date();
+  const protocol = getProtocolState(vaultPath, { now: at });
   const lastLogDate = getLastSupplementLogDate(vaultPath);
-  const today = isoDateInTimeZone(new Date());
+  const today = isoDateForAssistant(at);
 
   const lines: string[] = [];
 

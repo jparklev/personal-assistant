@@ -45,11 +45,13 @@ export type CaptureUrlResult =
 
 export async function captureUrlToFile(
   url: string,
-  onProgress?: (msg: string) => void
+  onProgress?: (msg: string) => void,
+  opts?: { now?: Date }
 ): Promise<CaptureUrlResult> {
   const progress = onProgress || (() => {});
   const type = detectContentType(url);
-  const capturedAt = new Date().toISOString();
+  const now = opts?.now || new Date();
+  const capturedAt = now.toISOString();
 
   if (type === 'podcast') {
     const transcriptionMethod = await getTranscriptionMethod();
@@ -80,7 +82,7 @@ export async function captureUrlToFile(
       description: res.podcastInfo?.description,
       author,
     };
-    const saved = saveCapture(meta, content);
+    const saved = saveCapture(meta, content, { now });
     if (!saved.success || !saved.filePath) return { success: false, error: saved.error || 'Failed to save capture' };
     return { success: true, capturePath: saved.filePath, captureFilename: saved.filePath.split('/').pop()!, meta };
   }
@@ -97,7 +99,7 @@ export async function captureUrlToFile(
       author: res.author,
     };
     const content = [`## Transcript`, '', res.transcript].join('\n');
-    const saved = saveCapture(meta, content);
+    const saved = saveCapture(meta, content, { now });
     if (!saved.success || !saved.filePath) return { success: false, error: saved.error || 'Failed to save capture' };
     return { success: true, capturePath: saved.filePath, captureFilename: saved.filePath.split('/').pop()!, meta };
   }
@@ -111,7 +113,7 @@ export async function captureUrlToFile(
       capturedAt,
     };
     const content = `PDF capture not implemented yet.\n\nSource: ${url}`;
-    const saved = saveCapture(meta, content);
+    const saved = saveCapture(meta, content, { now });
     if (!saved.success || !saved.filePath) return { success: false, error: saved.error || 'Failed to save capture' };
     return { success: true, capturePath: saved.filePath, captureFilename: saved.filePath.split('/').pop()!, meta };
   }
@@ -145,7 +147,7 @@ export async function captureUrlToFile(
     raw,
   ].join('\n');
 
-  const saved = saveCapture(meta, content);
+  const saved = saveCapture(meta, content, { now });
   if (!saved.success || !saved.filePath) return { success: false, error: saved.error || 'Failed to save capture' };
   return { success: true, capturePath: saved.filePath, captureFilename: saved.filePath.split('/').pop()!, meta };
 }

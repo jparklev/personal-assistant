@@ -3,7 +3,7 @@ import { appendFileSync, mkdirSync } from 'fs';
 import { dirname, join } from 'path';
 import type { AppContext } from '../events';
 import { getVoiceAttachments, transcribeMessageVoice } from '../voice';
-import { isoDateInTimeZone } from '../../time';
+import { DEFAULT_TIME_ZONE, formatTimeInTimeZone, isoDateForAssistant } from '../../time';
 import { requestVaultSync } from '../../vault/sync-queue';
 
 /**
@@ -85,19 +85,11 @@ async function appendDailyEntry(
 ): Promise<void> {
   const vaultPath = ctx.cfg.vaultPath;
 
-  // Get today's date in YYYY-MM-DD format
-  const today = isoDateInTimeZone(new Date());
-  const dailyNotePath = join(vaultPath, 'Daily', `${today}.md`);
+  const at = message.createdAt || new Date();
+  const date = isoDateForAssistant(at);
+  const dailyNotePath = join(vaultPath, 'Daily', `${date}.md`);
 
-  // Format timestamp (Pacific time)
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-    timeZone: 'America/Los_Angeles',
-  });
-
+  const timeStr = formatTimeInTimeZone(at, DEFAULT_TIME_ZONE);
   const entry = config.formatEntry(content, `${timeStr} PT`);
 
   try {
@@ -108,13 +100,13 @@ async function appendDailyEntry(
     appendFileSync(dailyNotePath, entry, 'utf-8');
 
     // Sync to git
-    requestVaultSync(vaultPath, config.commitMessage(today));
+    requestVaultSync(vaultPath, config.commitMessage(date));
 
     // React and reply with word count
     const wordCount = content.split(/\s+/).filter(Boolean).length;
     await message.react('👍');
 
-    await message.reply(`Logged ${wordCount} words to \`Daily/${today}.md\` (sync queued)`);
+    await message.reply(`Logged ${wordCount} words to \`Daily/${date}.md\` (sync queued)`);
   } catch (err: any) {
     console.error(`[${config.logName}] Failed to append:`, err);
     await message.reply(`Failed to log: ${err.message}`);

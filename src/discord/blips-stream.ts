@@ -21,6 +21,7 @@ import {
   touchBlip,
   appendToLog,
 } from '../blips';
+import { addDaysIsoDate, isoDateForAssistant } from '../time';
 
 const BLIPS_STREAM_CUSTOM_ID_PREFIX = 'blips_stream:';
 const BLIPS_STREAM_MODAL_PREFIX = 'blips_stream_modal:';
@@ -201,9 +202,8 @@ function blipPathFromFilename(filename: string): string {
 }
 
 function addDaysIso(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return d.toISOString().split('T')[0];
+  const today = isoDateForAssistant(new Date());
+  return addDaysIsoDate(today, days);
 }
 
 export function isBlipsStreamCustomId(customId: string): boolean {

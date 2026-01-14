@@ -11,6 +11,7 @@ import { loadConfig } from '../config';
 import { parseFrontmatter, serializeFrontmatter } from '../utils/frontmatter';
 import { ensureBlipsDir } from './files';
 import type { BlipFrontmatter, BlipStatus } from './types';
+import { isoDateForAssistant } from '../time';
 
 const config = loadConfig();
 
@@ -69,7 +70,7 @@ export function processClippings(): number {
 
       // Build blip frontmatter
       const title = clipFm.title || filename.replace('.md', '');
-      const created = clipFm.created || new Date().toISOString().split('T')[0];
+      const created = clipFm.created || isoDateForAssistant(new Date());
 
       const blipFm: BlipFrontmatter = {
         title,

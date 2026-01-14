@@ -4,6 +4,8 @@
  * Uses a simplified SM-2 spaced repetition algorithm.
  */
 
+import { isoDateForAssistant } from '../time';
+
 export interface Flashcard {
   id: string;
   question: string;
@@ -78,7 +80,7 @@ export function calculateNextReview(
   // Calculate next review date
   const nextReviewDate = new Date();
   nextReviewDate.setDate(nextReviewDate.getDate() + interval);
-  const nextReview = nextReviewDate.toISOString().split('T')[0];
+  const nextReview = isoDateForAssistant(nextReviewDate);
 
   return { easeFactor, interval, repetitions, nextReview };
 }
@@ -95,7 +97,7 @@ export function createFlashcard(
     tags?: string[];
   }
 ): Flashcard {
-  const today = new Date().toISOString().split('T')[0];
+  const today = isoDateForAssistant(new Date());
 
   return {
     id: `fc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,

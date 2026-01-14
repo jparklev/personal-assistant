@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { join, relative } from 'path';
 import type { ClipperHighlight, DailyNote, FollowupItem, GoalsDocument, VaultFile } from './types';
+import { addDaysIsoDate, isoDateForAssistant } from '../time';
 
 export class VaultReader {
   constructor(private vaultPath: string) {}
@@ -84,14 +85,15 @@ export class VaultReader {
 
   // Get today's daily note
   getTodayNote(): DailyNote | null {
-    const today = new Date().toISOString().split('T')[0];
-    return this.parseDailyNote(today);
+    const date = isoDateForAssistant(new Date());
+    return this.parseDailyNote(date);
   }
 
   // Get yesterday's daily note
   getYesterdayNote(): DailyNote | null {
-    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-    return this.parseDailyNote(yesterday);
+    const today = isoDateForAssistant(new Date());
+    const date = addDaysIsoDate(today, -1);
+    return this.parseDailyNote(date);
   }
 
   // Parse the goals document
@@ -253,10 +255,10 @@ export class VaultReader {
   // Get all recent daily notes (last N days)
   getRecentDailyNotes(days: number = 7): DailyNote[] {
     const notes: DailyNote[] = [];
-    const now = Date.now();
+    const today = isoDateForAssistant(new Date());
 
     for (let i = 0; i < days; i++) {
-      const date = new Date(now - i * 86400000).toISOString().split('T')[0];
+      const date = addDaysIsoDate(today, -i);
       const note = this.parseDailyNote(date);
       if (note) notes.push(note);
     }
