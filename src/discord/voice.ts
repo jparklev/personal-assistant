@@ -75,16 +75,10 @@ async function transcribeWithOpenAI(audioBuffer: Buffer, filename: string): Prom
   }
 
   try {
-    // Create form data for multipart upload
-    const FormData = (await import('form-data')).default;
-    const form = new FormData();
-
-    // Append the audio buffer as a file
-    form.append('file', audioBuffer, {
-      filename,
-      contentType: 'audio/ogg',
-    });
-    form.append('model', OPENAI_TRANSCRIPTION_MODEL);
+    // Use native FormData with Blob (works correctly with fetch in Bun/Node)
+    const formData = new FormData();
+    formData.append('file', new Blob([audioBuffer], { type: 'audio/ogg' }), filename);
+    formData.append('model', OPENAI_TRANSCRIPTION_MODEL);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), TRANSCRIPTION_TIMEOUT_MS);
@@ -94,9 +88,8 @@ async function transcribeWithOpenAI(audioBuffer: Buffer, filename: string): Prom
         method: 'POST',
         headers: {
           Authorization: `Bearer ${apiKey}`,
-          ...form.getHeaders(),
         },
-        body: form as any,
+        body: formData,
         signal: controller.signal,
       });
 
