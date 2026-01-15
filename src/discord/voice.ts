@@ -77,7 +77,7 @@ async function transcribeWithOpenAI(audioBuffer: Buffer, filename: string): Prom
   try {
     // Use native FormData with Blob (works correctly with fetch in Bun/Node)
     const formData = new FormData();
-    formData.append('file', new Blob([audioBuffer], { type: 'audio/ogg' }), filename);
+    formData.append('file', new Blob([new Uint8Array(audioBuffer)], { type: 'audio/ogg' }), filename);
     formData.append('model', OPENAI_TRANSCRIPTION_MODEL);
 
     const controller = new AbortController();
