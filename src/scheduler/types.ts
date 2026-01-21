@@ -4,7 +4,6 @@ export interface SchedulerContext {
   discordToken: string;
   channels: {
     morningCheckin?: string;
-    blips?: string;
     health?: string;
   };
 }
