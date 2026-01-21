@@ -10,7 +10,6 @@ import type { AppConfig } from '../config';
 import type { StateStore } from '../state';
 import { execSync } from 'child_process';
 import { SchedulerState } from './state';
-import { getBlipsToSurface, readBlip, touchBlip } from '../blips';
 import { getDueQuestions, markQuestionAsked } from '../memory';
 import { getTodayReminders } from '../integrations/reminders';
 import { buildAssistantContext } from '../assistant/invoke';
@@ -20,6 +19,7 @@ import {
   shouldSendCheckin,
   recordCheckinSent,
 } from '../health';
+import { isoDateForAssistant, addDaysIsoDate, DEFAULT_TIME_ZONE } from '../time';
 
 const CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 
@@ -154,22 +154,17 @@ async function runMorningCheckin(ctx: SchedulerContext): Promise<boolean> {
   }
 
   // Gather context
-  const blipSummaries = getBlipsToSurface(3);
-  const blipsToSurface = blipSummaries
-    .map((summary) => {
-      const blip = readBlip(summary.path);
-      return { summary, blip, reason: `Not touched since ${summary.touched}` };
-    })
-    .filter((b) => b.blip !== null);
   const dueQuestions = getDueQuestions();
   const reminders = getTodayReminders();
 
-  const today = new Date();
-  const yesterday = new Date(Date.now() - 86400000);
-  const dateStr = today.toLocaleDateString('en-US', {
+  // Use Pacific timezone with 5am rollover for "today" and "yesterday"
+  const todayIso = isoDateForAssistant();
+  const yesterdayIso = addDaysIsoDate(todayIso, -1);
+  const dateStr = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
+    timeZone: DEFAULT_TIME_ZONE,
   });
 
   const prompt = `You are the personal assistant. Generate a morning check-in message for Discord.
@@ -180,7 +175,7 @@ ${buildAssistantContext()}
 
 ## Sources to Synthesize
 
-1. **Yesterday's daily note** (${yesterday.toISOString().split('T')[0]}.md)
+1. **Yesterday's daily note** (${yesterdayIso}.md)
    - Read it from the vault at ${ctx.cfg.vaultPath}/Daily/
    - Look for incomplete checkbox items (- [ ])
    - Look for #followups tags
@@ -191,23 +186,13 @@ ${buildAssistantContext()}
       : '(none)'
   }
 
-3. **Blips to surface**:
-${
-  blipsToSurface.length > 0
-    ? blipsToSurface
-        .map((r) => `   - ${r.blip!.title}: ${r.blip!.content.slice(0, 100)}... (${r.reason})`)
-        .join('\n')
-    : '   (none ready)'
-}
-
-4. **Standing question**: ${dueQuestions[0]?.question || '(none due today)'}
+3. **Standing question**: ${dueQuestions[0]?.question || '(none due today)'}
 
 ## Message Guidelines
 
 - Greet warmly but concisely ("Good morning!" not "Good morning, Josh!")
 - Mention reminders if any are due today
 - If there are incomplete followups from yesterday, ask about them (accountable partner mode)
-- If there are blips to surface, pick ONE and ask a thought-provoking question about it
 - End with the standing question if there is one
 
   Remember: encourage thinking, don't just list things. Be concise. No emojis.
@@ -227,9 +212,6 @@ ${
 
   try {
     await (channel as TextChannel).send(message.slice(0, 2000));
-
-    // Mark blips as surfaced
-    blipsToSurface.forEach((r) => touchBlip(r.summary.path));
 
     // Mark question as asked
     if (dueQuestions[0]) {
@@ -259,11 +241,13 @@ async function runEveningCheckin(ctx: SchedulerContext): Promise<boolean> {
     return false;
   }
 
-  const today = new Date();
-  const dateStr = today.toLocaleDateString('en-US', {
+  // Use Pacific timezone with 5am rollover for "today"
+  const todayIso = isoDateForAssistant();
+  const dateStr = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
+    timeZone: DEFAULT_TIME_ZONE,
   });
 
   const prompt = `You are the personal assistant. Generate an evening check-in message for Discord.
@@ -274,7 +258,7 @@ ${buildAssistantContext()}
 
 ## Your Task
 
-Read today's daily note from the vault at ${ctx.cfg.vaultPath}/Daily/${today.toISOString().split('T')[0]}.md
+Read today's daily note from the vault at ${ctx.cfg.vaultPath}/Daily/${todayIso}.md
 
 Look for:
 - What was accomplished today
@@ -287,13 +271,12 @@ Look for:
 - Acknowledge what was done (without empty praise)
 - Surface any loose threads: "You mentioned X but didn't close the loop"
 - Ask one reflective question: "What's one thing you'd do differently?"
-- If appropriate, prompt for anything worth capturing as a blip
 
 Be brief. This is a wind-down, not a debrief. No emojis.
 
   Output ONLY the message to send, nothing else.`;
 
-  const fallback = `**Good evening!** How did today go?\n\nAnything worth capturing before you wind down?`;
+  const fallback = `**Good evening!** How did today go?`;
   let message = fallback;
 
   try {
@@ -328,8 +311,9 @@ async function runWeeklyReconsolidation(ctx: SchedulerContext): Promise<boolean>
     return false;
   }
 
-  const today = new Date();
-  const weekAgo = new Date(Date.now() - 7 * 86400000);
+  // Use Pacific timezone with 5am rollover for date calculations
+  const todayIso = isoDateForAssistant();
+  const weekAgoIso = addDaysIsoDate(todayIso, -7);
 
   const prompt = `You are the personal assistant. Generate a weekly reconsolidation message for Discord.
 
@@ -338,7 +322,7 @@ ${buildAssistantContext()}
 ## Your Task
 
 1. Read the daily notes from the past week in ${ctx.cfg.vaultPath}/Daily/
-   - Dates: ${weekAgo.toISOString().split('T')[0]} through ${today.toISOString().split('T')[0]}
+   - Dates: ${weekAgoIso} through ${todayIso}
 
 2. Read the Goals 2026 note if it exists
 

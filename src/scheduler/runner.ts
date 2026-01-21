@@ -10,7 +10,7 @@
  *
  * Tasks:
  *   - morning-checkin: Send morning check-in to Discord
- *   - weekly-reconsolidation: Weekly blips review
+ *   - weekly-reconsolidation: Weekly captures review
  *   - periodic-nudge: Placeholder (not implemented)
  */
 

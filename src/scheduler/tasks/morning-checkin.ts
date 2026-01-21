@@ -1,9 +1,9 @@
 import { Client, GatewayIntentBits, TextChannel } from 'discord.js';
 import type { SchedulerContext, TaskResult } from '../types';
-import { getBlipsToSurface, readBlip, touchBlip, type BlipSummary } from '../../blips';
 import { getDueQuestions, markQuestionAsked, updateMorningCheckin } from '../../memory';
 import { invokeClaudeCode, buildAssistantContext } from '../../assistant/invoke';
 import { getTodayReminders } from '../../integrations/reminders';
+import { isoDateForAssistant, addDaysIsoDate, DEFAULT_TIME_ZONE } from '../../time';
 
 export async function runMorningCheckin(ctx: SchedulerContext): Promise<TaskResult> {
   if (!ctx.channels.morningCheckin) {
@@ -11,20 +11,17 @@ export async function runMorningCheckin(ctx: SchedulerContext): Promise<TaskResu
   }
 
   // Gather context from all sources
-  const blipSummaries = getBlipsToSurface(3);
-  const blipsToSurface = blipSummaries.map((summary) => {
-    const blip = readBlip(summary.path);
-    return { summary, blip, reason: `Not touched since ${summary.touched}` };
-  }).filter((b) => b.blip !== null);
   const dueQuestions = getDueQuestions();
   const reminders = getTodayReminders();
 
-  const today = new Date();
-  const yesterday = new Date(Date.now() - 86400000);
-  const dateStr = today.toLocaleDateString('en-US', {
+  // Use Pacific timezone with 5am rollover for "today" and "yesterday"
+  const todayIso = isoDateForAssistant();
+  const yesterdayIso = addDaysIsoDate(todayIso, -1);
+  const dateStr = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
+    timeZone: DEFAULT_TIME_ZONE,
   });
 
   // Build prompt for Claude Code - let it read the vault directly
@@ -36,7 +33,7 @@ ${buildAssistantContext()}
 
 ## Sources to Synthesize
 
-1. **Yesterday's daily note** (${yesterday.toISOString().split('T')[0]}.md)
+1. **Yesterday's daily note** (${yesterdayIso}.md)
    - Read it from the vault
    - Look for incomplete checkbox items (- [ ])
    - Look for #followups tags
@@ -45,19 +42,13 @@ ${buildAssistantContext()}
     ? reminders.map(r => `"${r.name}" (${r.list})`).join(', ')
     : '(none)'}
 
-3. **Blips to surface**:
-${blipsToSurface.length > 0
-  ? blipsToSurface.map((r) => `   - ${r.blip!.title}: ${r.blip!.content.slice(0, 100)}... (${r.reason})`).join('\n')
-  : '   (none ready)'}
-
-4. **Standing question**: ${dueQuestions[0]?.question || '(none due today)'}
+3. **Standing question**: ${dueQuestions[0]?.question || '(none due today)'}
 
 ## Message Guidelines
 
 - Greet warmly but concisely ("Good morning!" not "Good morning, Josh!")
 - Mention reminders if any are due today
 - If there are incomplete followups from yesterday, ask about them (accountable partner mode)
-- If there are blips to surface, pick ONE and ask a thought-provoking question about it
 - End with the standing question if there is one
 
 Remember: encourage thinking, don't just list things. Be concise. No emojis.
@@ -72,7 +63,6 @@ Output ONLY the message to send, nothing else.`;
   });
 
   const morningContext: MorningContext = {
-    blipsToSurface,
     dueQuestions,
     remindersCount: reminders.length,
   };
@@ -87,7 +77,6 @@ Output ONLY the message to send, nothing else.`;
 }
 
 interface MorningContext {
-  blipsToSurface: { summary: BlipSummary }[];
   dueQuestions: { id: string }[];
   remindersCount: number;
 }
@@ -119,9 +108,6 @@ async function sendMessage(
 
     await channel.send(message);
 
-    // Mark blips as surfaced (touch them)
-    morning.blipsToSurface.forEach((r) => touchBlip(r.summary.path));
-
     // Mark question as asked
     if (morning.dueQuestions[0]) {
       markQuestionAsked(morning.dueQuestions[0].id);
@@ -135,7 +121,6 @@ async function sendMessage(
       message: `Morning check-in sent to ${channel.name}`,
       data: {
         remindersCount: morning.remindersCount,
-        blipsCount: morning.blipsToSurface.length,
         questionAsked: morning.dueQuestions[0]?.id,
         usedClaudeCode: true,
       },
@@ -150,24 +135,20 @@ async function sendMessage(
 // For testing - generate without sending
 export async function generateMorningCheckinContent(): Promise<{
   message: string;
-  blipsToSurface: { title: string; content: string; reason: string }[];
   remindersCount: number;
   dueQuestion?: { id: string; question: string };
 }> {
-  const blipSummaries = getBlipsToSurface(3);
-  const blipsToSurface = blipSummaries.map((summary) => {
-    const blip = readBlip(summary.path);
-    return { summary, blip, reason: `Not touched since ${summary.touched}` };
-  }).filter((b) => b.blip !== null);
   const dueQuestions = getDueQuestions();
   const reminders = getTodayReminders();
 
-  const today = new Date();
-  const yesterday = new Date(Date.now() - 86400000);
-  const dateStr = today.toLocaleDateString('en-US', {
+  // Use Pacific timezone with 5am rollover for "today" and "yesterday"
+  const todayIso = isoDateForAssistant();
+  const yesterdayIso = addDaysIsoDate(todayIso, -1);
+  const dateStr = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
+    timeZone: DEFAULT_TIME_ZONE,
   });
 
   const prompt = `You are the personal assistant. Generate a morning check-in message.
@@ -178,7 +159,7 @@ ${buildAssistantContext()}
 
 ## Sources to Synthesize
 
-1. **Yesterday's daily note** (${yesterday.toISOString().split('T')[0]}.md)
+1. **Yesterday's daily note** (${yesterdayIso}.md)
    - Read it from the vault
    - Look for incomplete checkbox items (- [ ])
    - Look for #followups tags
@@ -187,19 +168,13 @@ ${buildAssistantContext()}
     ? reminders.map(r => `"${r.name}" (${r.list})`).join(', ')
     : '(none)'}
 
-3. **Blips to surface**:
-${blipsToSurface.length > 0
-  ? blipsToSurface.map((r) => `   - ${r.blip!.title}: ${r.blip!.content.slice(0, 100)}... (${r.reason})`).join('\n')
-  : '   (none ready)'}
-
-4. **Standing question**: ${dueQuestions[0]?.question || '(none due today)'}
+3. **Standing question**: ${dueQuestions[0]?.question || '(none due today)'}
 
 ## Message Guidelines
 
 - Greet warmly but concisely
 - Mention reminders if any are due today
 - If there are incomplete followups from yesterday, ask about them
-- If there are blips to surface, pick ONE and ask about it
 - End with the standing question if there is one
 
 Remember: encourage thinking, don't just list things. Be concise. No emojis.
@@ -216,11 +191,6 @@ Output ONLY the message, nothing else.`;
 
   return {
     message,
-    blipsToSurface: blipsToSurface.map((r) => ({
-      title: r.blip!.title,
-      content: r.blip!.content,
-      reason: r.reason,
-    })),
     remindersCount: reminders.length,
     dueQuestion: dueQuestions[0] ? { id: dueQuestions[0].id, question: dueQuestions[0].question } : undefined,
   };
