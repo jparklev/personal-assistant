@@ -583,12 +583,14 @@ async function runAssistantTurn(
       }
     } else {
       try {
-        const recentMessages = await message.channel.messages.fetch({ limit: 4, before: message.id });
+        const recentMessages = await message.channel.messages.fetch({ limit: 15, before: message.id });
         const relevant = Array.from(recentMessages.values())
           .reverse()
           .map((m) => {
             const author = m.author.bot ? 'Assistant' : 'User';
-            return `**${author}:** ${m.content.slice(0, 300)}${m.content.length > 300 ? '...' : ''}`;
+            const msgDate = isoDateForAssistant(m.createdAt);
+            const msgTime = formatTimeInTimeZone(m.createdAt, DEFAULT_TIME_ZONE);
+            return `**${author}** (${msgDate} ${msgTime}): ${m.content.slice(0, 400)}${m.content.length > 400 ? '...' : ''}`;
           });
 
         if (relevant.length > 0) {
@@ -663,7 +665,7 @@ ${vaultVoice}`;
     } else if (channelType === 'health') {
       prompt = `${channelContext}${timeContext}## Current User Message\n\n${text}
 
-**Reminder**: This is a #health conversation. Log any health info to the vault:
+**Reminder**: This is a #health conversation. If you haven't already, read recent daily notes (\`Daily/\` - today and last 2-3 days) and the supplement log to understand context. Log any health info to the vault:
 - Supplements → \`Health & Wellness/Supplements/Log.md\`
 - Symptoms/energy → \`Daily/${assistantDate}.md\` under \`## Health\`
 
@@ -682,14 +684,24 @@ ${channelContext}${conversationContext}${timeContext}## Current User Message
 
 ${text}
 
-## Instructions
+## CRITICAL: Gather Context Before Responding
 
-You have access to Josh's full health context in the vault. Use the Read, Edit, and Write tools to:
-- Read health files for details (don't guess - look it up)
+Before responding to Josh, READ the relevant files to understand recent context:
+
+1. **Recent daily notes**: Check \`Daily/\` for today and the last 2-3 days if they exist - look for morning notes, planned supplements, symptoms, energy levels
+2. **Recent supplement log**: \`Health & Wellness/Supplements/Log.md\` - What was logged recently? What's the pattern?
+3. **Current stack**: \`Health & Wellness/Supplements/Stack.md\` - What supplements are in the current rotation?
+4. **Recent git history**: Run \`git log --oneline -10 -- "Daily/" "Health & Wellness/"\` to see what Josh has been updating
+
+This context is essential. If Josh mentions something "from this morning" or references plans, you need to have read the files to know what he's talking about. Don't guess - look it up.
+
+## After Gathering Context
+
+Use the Read, Edit, and Write tools to:
 - Append supplement logs to \`Health & Wellness/Supplements/Log.md\`
 - Append symptoms/energy to \`Daily/${assistantDate}.md\` under a \`## Health\` section
 
-When logging, use formats consistent with existing entries. Check the files first if unsure.
+When logging, use formats consistent with existing entries.
 
 ${vaultVoice}
 
