@@ -921,11 +921,18 @@ Output ONLY your response message, nothing else.`;
         requestVaultSync(ctx.cfg.vaultPath, commitMsg);
       }
     } else {
+      console.error('[Assistant] Claude returned non-ok result:', {
+        ok: result.ok,
+        text: result.text?.slice(0, 200),
+        toolsUsed: result.toolsUsed,
+        durationMs: result.durationMs,
+      });
       progressEditor.close();
       const errorMsg = result.text || 'I had trouble processing that. Please try again.';
       await progressMsg.edit(errorMsg);
     }
   } catch (error: any) {
+    console.error('[Assistant] Error processing message:', error);
     progressEditor.close();
     const msg = `I had trouble processing that. ${error?.message || 'Please try again.'}`;
     await progressMsg.edit(msg);
