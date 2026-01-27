@@ -111,20 +111,25 @@ This is the Discord bot that routes messages to Claude. Key areas include `src/s
 
 ## Deployment
 
-The bot runs on a VPS at `143.198.101.198` (DigitalOcean sfo3). The service can be checked with `systemctl status personal-assistant`. Vault sync runs every 5 minutes via systemd timer.
+The bot runs on a VPS at `143.198.101.198` (DigitalOcean sfo3). Vault sync runs every 5 minutes via systemd timer.
 
-To deploy local changes:
+**Deploys are automatic.** Pushes/merges to `main` trigger a GitHub Actions workflow that pulls, builds, and restarts the service on the VPS. Do not manually SSH to deploy.
+
+After pushing, confirm the deploy succeeded:
 
 ```bash
-# Commit and push
-git add . && git commit -m "your message" && git push
+# Watch the GitHub Actions run
+gh run watch
 
-# Pull, build, and restart on VPS
-ssh assistant@143.198.101.198 "cd ~/personal-assistant && git pull && ~/.bun/bin/bunx tsc"
-ssh root@143.198.101.198 "systemctl restart personal-assistant"
+# Or check the latest run
+gh run list --limit 1
+```
 
-# Verify
+For manual debugging on the VPS (not routine deploys):
+
+```bash
+ssh root@143.198.101.198 "systemctl status personal-assistant"
 ssh root@143.198.101.198 "journalctl -u personal-assistant -n 20"
 ```
 
-The VPS tracks the `main` branch. See `docs/DEPLOYMENT.md` for the full operations guide.
+See `docs/DEPLOYMENT.md` for the full operations guide.
