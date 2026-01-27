@@ -644,7 +644,8 @@ async function runAssistantTurn(
   const timeContext = `## Time Context\n\n- User timezone: ${DEFAULT_TIME_ZONE} (Pacific)\n- Message time: ${timeStr} PT\n- Effective date for notes/files: ${assistantDate} (00:00–04:59 PT counts as previous day)\n\n`;
   const vaultVoice =
     `When writing/editing anything in the Obsidian vault, write in Josh's voice (first-person, casual). ` +
-    `Never refer to Josh in third person.`;
+    `Never refer to Josh in third person. ` +
+    `IMPORTANT: Never add a top-level heading (# YYYY-MM-DD) to daily notes — Obsidian already displays the filename as the title.`;
 
   // Build the prompt - health channel gets specialized context
   let prompt: string;

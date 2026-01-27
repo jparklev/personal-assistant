@@ -182,6 +182,7 @@ export function buildHealthContext(vaultPath: string, opts?: { now?: Date }): st
   lines.push('- Supplements → append to `Health & Wellness/Supplements/Log.md`');
   lines.push(`- Symptoms/energy → append to \`Daily/${today}.md\` under a \`## Health\` section`);
   lines.push('- Use Edit tool to append, preserving existing content');
+  lines.push('- Never add a top-level heading (# YYYY-MM-DD) to daily notes — Obsidian shows the filename as the title');
   lines.push('');
   lines.push('**Key context:**');
   lines.push('- Read `Health & Wellness/Health Profile.md` for constraints and what tends to backfire');
