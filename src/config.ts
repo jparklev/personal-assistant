@@ -11,6 +11,7 @@ export interface AppConfig {
   blipsDir: string;
   clippingsDir: string;
   projectsDir: string;
+  tradingDir: string;
   assistantDir: string;
 }
 
@@ -51,6 +52,7 @@ export function loadConfig(): AppConfig {
     blipsDir: join(vaultPath, 'Blips'),
     clippingsDir: join(vaultPath, 'Clippings'),
     projectsDir: join(vaultPath, 'Projects'),
+    tradingDir: join(vaultPath, 'Trading'),
     assistantDir: process.env.ASSISTANT_DIR?.trim() || defaultAssistantDir,
   };
 }

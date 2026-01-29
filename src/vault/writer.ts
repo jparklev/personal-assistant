@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { isoDateForAssistant } from '../time';
 
-const WRITABLE_FOLDERS = ['Note Inbox.md', 'Daily/', 'Drafts/', 'Projects/Inbox.md', 'Clippings/'];
+const WRITABLE_FOLDERS = ['Note Inbox.md', 'Daily/', 'Drafts/', 'Projects/Inbox.md', 'Clippings/', 'Trading/'];
 
 export class VaultWriter {
   constructor(

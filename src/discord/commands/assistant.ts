@@ -56,6 +56,7 @@ async function handleChannel(
     | 'blips'
     | 'blipsStream'
     | 'lobby'
+    | 'trading'
     | 'health'
     | 'ideas'
     | 'meditationLogs'
@@ -71,6 +72,7 @@ async function handleChannel(
     blips: 'Blips',
     blipsStream: 'Blips Stream',
     lobby: 'Lobby',
+    trading: 'Trading',
     health: 'Health',
     ideas: 'Ideas',
     meditationLogs: 'Meditation Logs',
@@ -114,6 +116,7 @@ async function handleStatus(
     channels.blips ? `  Blips: <#${channels.blips}>` : '  Blips: not set',
     channels.blipsStream ? `  Blips Stream: <#${channels.blipsStream}>` : '  Blips Stream: not set',
     channels.lobby ? `  Lobby: <#${channels.lobby}>` : '  Lobby: not set',
+    channels.trading ? `  Trading: <#${channels.trading}>` : '  Trading: not set',
     channels.health ? `  Health: <#${channels.health}>` : '  Health: not set',
     channels.ideas ? `  Ideas: <#${channels.ideas}>` : '  Ideas: not set',
     channels.meditationLogs
