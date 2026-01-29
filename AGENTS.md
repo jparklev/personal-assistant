@@ -43,7 +43,7 @@ Properties:
 - Creation is **lobby-only** and requires a **confirmation reply** (`confirm` / `cancel`).
 - Each created channel is added to `assistant.managedChannelIds` in `state/assistant.json` and treated like an assistant channel.
 - Each created channel gets per-channel additive memory at `~/.assistant/channels/<channelId>/memory.md` (outside the Obsidian vault).
-- Managed channels still have access to shared resources: the Obsidian vault and global captures in `~/.assistant/captures/`.
+- Managed channels still have access to shared resources: the Obsidian vault (including captures in `Clippings/`).
 
 Setup:
 
@@ -62,15 +62,14 @@ In the lobby channel, ask:
 
 ## Capture/Blips storage conventions (important)
 
-- Obsidian vault is for human-facing notes only.
-- Full raw captures live outside the vault: `~/.assistant/captures/`.
+- All captures live in the Obsidian vault's `Clippings/` folder (git-synced with the vault).
 - A blip note in the vault links to its capture:
   - frontmatter includes `capture: <filename>.md` (when single primary URL)
-  - body includes `Full capture: ~/.assistant/captures/<filename>.md`
+  - body includes `Full capture: Clippings/<filename>.md`
 
 URL capture pipeline:
 
-- `src/captures/capture-url.ts`: writes `~/.assistant/captures/<date>-<title>.md`
+- `src/captures/capture-url.ts`: writes `Clippings/<date>-<title>.md` in the vault
   - articles: extracted text + raw HTML (may be truncated)
   - Pocket Casts: transcript scrape fallback (no Whisper required if transcript exists)
   - YouTube: optional `yt-dlp` + `mlx_whisper` pipeline if installed
@@ -101,7 +100,7 @@ In `#blips`, post a URL.
 Expected:
 
 - bot replies with `Captured blip <filename>.md`
-- capture file created in `~/.assistant/captures/`
+- capture file created in vault's `Clippings/`
 - blip created in the vault `Blips/` with `capture: ...` frontmatter
 
 ### 2) Reply-to-bot in #blips (follow-up)

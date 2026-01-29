@@ -59,8 +59,9 @@ function buildCaptureIndex(capturesDir: string): Map<string, CaptureInfo> {
 }
 
 function ensureFullCaptureLine(content: string, captureFilename: string): string {
-  const line = `- Full capture: ~/.assistant/captures/${captureFilename}`;
-  if (content.includes(line)) return content;
+  const line = `- Full capture: Clippings/${captureFilename}`;
+  // Also check for old path format for backwards compatibility
+  if (content.includes(line) || content.includes(`~/.assistant/captures/${captureFilename}`)) return content;
 
   const marker = '## Capture';
   const idx = content.indexOf(marker);

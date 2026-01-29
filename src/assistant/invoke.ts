@@ -65,7 +65,7 @@ export function buildAssistantContext(opts: {
       `- Blips dir: ${cfg.blipsDir}`,
       `- Vault: ${cfg.vaultPath}`,
       `- Assistant dir: ${cfg.assistantDir}`,
-      `- Captures dir: ~/.assistant/captures/`,
+      `- Clippings dir: ${cfg.clippingsDir}`,
       '',
       `Use tools (Read/Glob/Grep/git/gh) when you need details; avoid guessing.`,
     ].join('\n')
