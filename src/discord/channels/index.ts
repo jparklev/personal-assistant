@@ -22,6 +22,7 @@ import { dailiesHandler } from './dailies';
 import { blipsHandler } from './blips';
 import { lobbyHandler } from './lobby';
 import { flashcardsHandler, isFlashcardCustomId, handleFlashcardButton } from './flashcards';
+import { ideasHandler } from './ideas';
 
 // Re-export utilities that events.ts needs
 export {
@@ -45,6 +46,7 @@ export type { ChannelHandler, ChannelMatchContext } from './types';
 const handlers: ChannelHandler[] = [
   lobbyHandler,
   blipsHandler,
+  ideasHandler,
   flashcardsHandler,
   meditationHandler,
   dailiesHandler,

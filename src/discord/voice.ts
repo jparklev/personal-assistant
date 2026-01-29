@@ -6,6 +6,11 @@
  */
 
 import type { Message, Attachment } from 'discord.js';
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
+
+const TRANSCRIPTIONS_DIR = join(homedir(), '.assistant', 'transcriptions');
 
 const OPENAI_TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe';
 const TRANSCRIPTION_TIMEOUT_MS = 120000;
@@ -185,4 +190,32 @@ export async function transcribeMessageVoice(message: Message): Promise<{
   }
 
   return { transcripts, errors };
+}
+
+/**
+ * Store a voice transcription for later context building.
+ * Stored at ~/.assistant/transcriptions/{messageId}.txt
+ */
+export function storeTranscription(messageId: string, transcript: string): void {
+  try {
+    mkdirSync(TRANSCRIPTIONS_DIR, { recursive: true });
+    const path = join(TRANSCRIPTIONS_DIR, `${messageId}.txt`);
+    writeFileSync(path, transcript, 'utf-8');
+  } catch (error) {
+    console.error('Error storing transcription:', error);
+  }
+}
+
+/**
+ * Load a stored transcription by message ID.
+ * Returns null if not found.
+ */
+export function loadTranscription(messageId: string): string | null {
+  const path = join(TRANSCRIPTIONS_DIR, `${messageId}.txt`);
+  if (!existsSync(path)) return null;
+  try {
+    return readFileSync(path, 'utf-8');
+  } catch {
+    return null;
+  }
 }

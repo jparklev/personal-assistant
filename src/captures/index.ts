@@ -2,7 +2,7 @@
  * Captures Module
  *
  * Captures content from URLs, YouTube videos, podcasts, etc.
- * Saves to ~/.assistant/captures/ with frontmatter for searchability.
+ * Saves to the Obsidian vault's Clippings/ folder with frontmatter for searchability.
  *
  * Uses progressive disclosure:
  * - Index contains metadata only (title, url, type, date, tags)
@@ -11,15 +11,21 @@
 
 import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
 import { parseFrontmatter } from '../utils/frontmatter';
 import { isoDateForAssistant } from '../time';
+import { loadConfig } from '../config';
 
-export const CAPTURES_DIR = join(homedir(), '.assistant', 'captures');
+/** Get the captures directory (vault's Clippings folder) */
+export function getCapturesDir(): string {
+  return loadConfig().clippingsDir;
+}
+
+/** @deprecated Use getCapturesDir() instead */
+export const CAPTURES_DIR = getCapturesDir();
 
 // Ensure captures directory exists
 export function ensureCapturesDir(): void {
-  mkdirSync(CAPTURES_DIR, { recursive: true });
+  mkdirSync(getCapturesDir(), { recursive: true });
 }
 
 export interface CaptureMetadata {
@@ -129,9 +135,10 @@ export function saveCapture(
 ): CaptureResult {
   ensureCapturesDir();
 
+  const capturesDir = getCapturesDir();
   const date = isoDateForAssistant(opts?.now || new Date());
   const filename = `${date}-${safeFilename(meta.title)}.md`;
-  const filePath = join(CAPTURES_DIR, filename);
+  const filePath = join(capturesDir, filename);
 
   // Check for duplicate
   if (existsSync(filePath)) {
@@ -154,9 +161,10 @@ export function saveCapture(
  */
 export function listCaptures(limit: number = 10): string[] {
   ensureCapturesDir();
+  const capturesDir = getCapturesDir();
 
   try {
-    const files = readdirSync(CAPTURES_DIR)
+    const files = readdirSync(capturesDir)
       .filter((f) => f.endsWith('.md'))
       .sort()
       .reverse()
@@ -186,12 +194,13 @@ export interface CaptureIndexEntry {
  */
 export function buildCapturesIndex(): CaptureIndexEntry[] {
   ensureCapturesDir();
+  const capturesDir = getCapturesDir();
 
-  const files = readdirSync(CAPTURES_DIR).filter((f) => f.endsWith('.md'));
+  const files = readdirSync(capturesDir).filter((f) => f.endsWith('.md'));
   const entries: CaptureIndexEntry[] = [];
 
   for (const filename of files) {
-    const path = join(CAPTURES_DIR, filename);
+    const path = join(capturesDir, filename);
     try {
       const raw = readFileSync(path, 'utf-8');
       const { frontmatter } = parseFrontmatter<{
@@ -250,7 +259,7 @@ export function formatCapturesForContext(limit: number = 20): string {
     lines.push(`| ${date} | ${entry.type} | ${title} | ${tags} |`);
   }
 
-  lines.push('', `To read full capture: ~/.assistant/captures/<filename>`);
+  lines.push('', `To read full capture: Clippings/<filename>`);
 
   return lines.join('\n');
 }

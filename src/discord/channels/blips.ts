@@ -334,7 +334,7 @@ async function handleUrlCapture(
     const captureField = successes.length === 1 ? primary.captureFilename : undefined;
 
     const captureLines = successes
-      .map((c) => `- Full capture: ~/.assistant/captures/${c.captureFilename}`)
+      .map((c) => `- Full capture: Clippings/${c.captureFilename}`)
       .join('\n');
     const failureLines =
       failures.length > 0
@@ -373,7 +373,7 @@ async function handleUrlCapture(
     const response = [
       `Captured blip \`${filename}\``,
       `- Title: ${shortTitle}`,
-      ...successes.map((c) => `- Full capture: ~/.assistant/captures/${c.captureFilename}`),
+      ...successes.map((c) => `- Full capture: Clippings/${c.captureFilename}`),
       duplicates.length > 0
         ? `- Skipped ${duplicates.length} duplicate(s): ${duplicates
             .slice(0, 3)

@@ -24,7 +24,7 @@ import {
   handleBlipsStreamModal,
   isBlipsStreamCustomId,
 } from './blips-stream';
-import { getVoiceAttachments, transcribeMessageVoice } from './voice';
+import { getVoiceAttachments, transcribeMessageVoice, loadTranscription, storeTranscription } from './voice';
 import {
   routeToChannelHandler,
   readChannelMemory,
@@ -48,7 +48,7 @@ export interface AppContext {
 type QueuedAssistantMessage = {
   message: Message;
   text: string;
-  channelType: 'general' | 'morning-checkin' | 'blips' | 'lobby' | 'health';
+  channelType: 'general' | 'morning-checkin' | 'blips' | 'lobby' | 'health' | 'ideas';
 };
 
 type RunningAssistantTask = {
@@ -453,8 +453,11 @@ async function handleAssistantMessage(message: Message, ctx: AppContext): Promis
     const { transcripts, errors } = await transcribeMessageVoice(message);
 
     if (transcripts.length > 0) {
-      // Prefix with "(voice transcribed)" so the assistant knows this came from speech
-      const voiceText = transcripts.map((t) => `(voice transcribed) ${t}`).join('\n\n');
+      // Store transcription for context building (especially useful for ideas channel)
+      storeTranscription(message.id, transcripts.join('\n\n'));
+
+      // Prefix with "[Voice]:" so the assistant knows this came from speech
+      const voiceText = transcripts.map((t) => `[Voice]: ${t}`).join('\n\n');
       text = text ? `${voiceText}\n\n${text}` : voiceText;
     } else if (errors.length > 0 && !text) {
       await message.reply(`Couldn't transcribe voice message: ${errors[0]}`);
@@ -470,6 +473,7 @@ async function handleAssistantMessage(message: Message, ctx: AppContext): Promis
   else if (message.channelId === assistantChannels.blips) channelType = 'blips';
   else if (message.channelId === assistantChannels.lobby) channelType = 'lobby';
   else if (message.channelId === assistantChannels.health) channelType = 'health';
+  else if (message.channelId === assistantChannels.ideas) channelType = 'ideas';
 
   // Record user response for health check-in tracking.
   // (Any activity in #health counts as "not ignored".)
@@ -482,7 +486,8 @@ async function handleAssistantMessage(message: Message, ctx: AppContext): Promis
     message.channelId === assistantChannels.morningCheckin ||
     message.channelId === assistantChannels.blips ||
     message.channelId === assistantChannels.lobby ||
-    message.channelId === assistantChannels.health;
+    message.channelId === assistantChannels.health ||
+    message.channelId === assistantChannels.ideas;
 
   if (!isCore) {
     const managed = getManagedAssistantChannelIds(ctx.state);
@@ -583,14 +588,28 @@ async function runAssistantTurn(
       }
     } else {
       try {
-        const recentMessages = await message.channel.messages.fetch({ limit: 15, before: message.id });
+        // Ideas channel gets more context (25 messages) for fragmented voice-to-text
+        const historyLimit = channelType === 'ideas' ? 25 : 15;
+        const recentMessages = await message.channel.messages.fetch({ limit: historyLimit, before: message.id });
         const relevant = Array.from(recentMessages.values())
           .reverse()
           .map((m) => {
             const author = m.author.bot ? 'Assistant' : 'User';
             const msgDate = isoDateForAssistant(m.createdAt);
             const msgTime = formatTimeInTimeZone(m.createdAt, DEFAULT_TIME_ZONE);
-            return `**${author}** (${msgDate} ${msgTime}): ${m.content.slice(0, 400)}${m.content.length > 400 ? '...' : ''}`;
+
+            // For ideas channel, check if there's a stored transcription for voice messages
+            let content = m.content;
+            if (channelType === 'ideas' && getVoiceAttachments(m).length > 0) {
+              const storedTranscript = loadTranscription(m.id);
+              if (storedTranscript) {
+                content = `[Voice]: ${storedTranscript}${content ? '\n' + content : ''}`;
+              } else if (!content) {
+                content = '[Voice message - transcription not available]';
+              }
+            }
+
+            return `**${author}** (${msgDate} ${msgTime}): ${content.slice(0, 400)}${content.length > 400 ? '...' : ''}`;
           });
 
         if (relevant.length > 0) {
@@ -671,6 +690,24 @@ ${vaultVoice}`;
 - Symptoms/energy → \`Daily/${assistantDate}.md\` under \`## Health\`
 
 ${vaultVoice}`;
+    } else if (channelType === 'ideas') {
+      const inboxPath = `${ctx.cfg.vaultPath}/Projects/Inbox.md`;
+      prompt = `${channelContext}${timeContext}## Current User Message\n\n${text}
+
+**Reminder**: This is an #ideas conversation. Use the Edit tool to update the idea in \`${inboxPath}\`:
+- If developing a bullet, convert it to a dated section: \`## ${assistantDate} - [Title]\`
+- Append new thoughts in Josh's voice (first-person, casual)
+- Keep developing until the idea is clear
+- Clean up earlier drafts that have been superseded
+
+**Seeds Lab style**: Push back hard on things that don't hold together. Ask clarifying questions:
+- What tension or pattern does this reveal?
+- What would be a tiny next step?
+- How does this connect to something you're already working on?
+
+Josh wants honest engagement, not validation.
+
+${vaultVoice}`;
     } else {
       prompt = `${channelContext}${timeContext}## Current User Message\n\n${text}\n\n${vaultVoice}`;
     }
@@ -715,7 +752,7 @@ Style:
 Output your response message directly.`;
   } else if (channelType === 'blips') {
     // Blips channel - capture ideas and URLs as blip files
-    const capturesDir = `${process.env.HOME}/.assistant/captures`;
+    const clippingsDir = `${ctx.cfg.vaultPath}/Clippings`;
     const blipsDir = `${ctx.cfg.vaultPath}/Blips`;
 
     prompt = `You are Josh's blips assistant responding in the #blips Discord channel.
@@ -739,7 +776,7 @@ If you create a file without proper YAML frontmatter starting with \`---\`, the 
 
 ### If a URL is shared (with or without commentary):
 1. Use WebFetch with this exact prompt: "Return the COMPLETE article/page content as markdown. Preserve ALL text, headings, quotes, code blocks, and formatting. Do not summarize or truncate. Include the title and author if present."
-2. Create a capture file at \`${capturesDir}/${assistantDate}-SLUG.md\` containing:
+2. Create a capture file at \`${clippingsDir}/${assistantDate}-SLUG.md\` containing:
    - The URL as a header
    - The full WebFetch response (the complete article content)
 3. Create a blip file at \`${blipsDir}/${assistantDate}-SLUG.md\` with this format:
@@ -760,7 +797,7 @@ capture: ${assistantDate}-SLUG.md
 
 ## Capture
 
-- Full capture: ~/.assistant/captures/${assistantDate}-SLUG.md
+- Full capture: Clippings/${assistantDate}-SLUG.md
 
 ## Notes
 
