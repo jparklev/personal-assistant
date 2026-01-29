@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
 import { dirname } from 'path';
+import type { ChannelTypeKey } from './discord/channels/types';
 
 export interface AssistantStateConfig {
   enabled: boolean;
@@ -10,6 +11,7 @@ export interface AssistantStateConfig {
     blips?: string; // Unified channel for blips + captures
     blipsStream?: string;
     lobby?: string;
+    trading?: string; // Trade logging, reflection, and idea curation
     meditationLogs?: string; // Voice logs appended to daily notes
     dailies?: string; // Daily voice notes appended to daily notes
     flashcards?: string; // Spaced repetition flashcard review
@@ -75,7 +77,7 @@ export class StateStore {
 
   // Assistant channel management
   setAssistantChannel(
-    type: 'morningCheckin' | 'blips' | 'blipsStream' | 'lobby' | 'meditationLogs' | 'dailies' | 'flashcards' | 'health' | 'ideas',
+    type: ChannelTypeKey,
     channelId: string | undefined
   ): void {
     if (!channelId) {
@@ -85,7 +87,9 @@ export class StateStore {
     }
   }
 
-  getAssistantChannel(type: 'morningCheckin' | 'blips' | 'blipsStream' | 'lobby' | 'meditationLogs' | 'dailies' | 'flashcards' | 'health' | 'ideas'): string | undefined {
+  getAssistantChannel(
+    type: ChannelTypeKey
+  ): string | undefined {
     return this.state.assistant.channels[type];
   }
 
@@ -134,6 +138,7 @@ export class StateStore {
       if (typeof rawChannels.blips === 'string') channels.blips = rawChannels.blips;
       if (typeof rawChannels.blipsStream === 'string') channels.blipsStream = rawChannels.blipsStream;
       if (typeof rawChannels.lobby === 'string') channels.lobby = rawChannels.lobby;
+      if (typeof rawChannels.trading === 'string') channels.trading = rawChannels.trading;
       if (typeof rawChannels.meditationLogs === 'string') channels.meditationLogs = rawChannels.meditationLogs;
       if (typeof rawChannels.dailies === 'string') channels.dailies = rawChannels.dailies;
       if (typeof rawChannels.flashcards === 'string') channels.flashcards = rawChannels.flashcards;

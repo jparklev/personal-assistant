@@ -54,6 +54,7 @@ export type ChannelTypeKey =
   | 'blips'
   | 'blipsStream'
   | 'lobby'
+  | 'trading'
   | 'meditationLogs'
   | 'dailies'
   | 'flashcards'
