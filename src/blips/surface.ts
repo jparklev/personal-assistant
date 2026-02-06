@@ -28,9 +28,16 @@ export function getBlipsToSurface(count: number = 3): BlipSummary[] {
     if (b.status === 'snoozed') {
       // Need to read full blip to check snoozed_until
       const full = readBlip(b.path);
-      if (full && full.frontmatter.snoozed_until) {
-        return new Date(full.frontmatter.snoozed_until) <= now;
+      if (!full) return false;
+      const untilRaw = full.frontmatter.snoozed_until;
+      if (!untilRaw) return true;
+
+      const untilMs = Date.parse(untilRaw);
+      if (!Number.isFinite(untilMs)) {
+        // Corrupted date should not permanently hide the blip.
+        return true;
       }
+      return untilMs <= now.getTime();
     }
 
     return false;

@@ -76,6 +76,31 @@ function blipExists(filename: string): boolean {
   return existsSync(path);
 }
 
+export function isSurfaceableBlipFilename(filename: string, now: Date = new Date()): boolean {
+  const cfg = loadConfig();
+  const path = join(cfg.blipsDir, filename);
+  const blip = readBlip(path);
+  if (!blip) return false;
+
+  if (blip.status === 'active') return true;
+  if (blip.status !== 'snoozed') return false;
+
+  const untilRaw = blip.frontmatter.snoozed_until;
+  if (!untilRaw) return true;
+
+  const untilMs = Date.parse(untilRaw);
+  if (!Number.isFinite(untilMs)) return true;
+  return untilMs <= now.getTime();
+}
+
+export function pickCurrentOrNextFilename(
+  currentFilename: string | null | undefined,
+  fallbackFilename: string | null | undefined
+): string | null {
+  if (currentFilename && isSurfaceableBlipFilename(currentFilename)) return currentFilename;
+  return fallbackFilename || null;
+}
+
 function excerptBlipContent(raw: string, maxLen: number): string {
   const content = raw.split(/\n##\s+Log\b/)[0] || raw;
   const trimmed = content.trim();
@@ -173,8 +198,8 @@ export async function ensureBlipsStreamCard(opts: {
   const state = readStreamState();
   const slot = (state[channel.id] ||= {});
 
-  const wanted = slot.currentFilename && blipExists(slot.currentFilename) ? slot.currentFilename : null;
-  const filename = wanted || getNextBlipFilename() || null;
+  const wanted = slot.currentFilename || null;
+  const filename = pickCurrentOrNextFilename(wanted, getNextBlipFilename());
   if (!filename) return;
 
   const payload = renderBlipCard({ filename });
@@ -307,6 +332,11 @@ export async function handleBlipsStreamButton(interaction: ButtonInteraction): P
     return;
   }
 
+  if (!blipExists(filename)) {
+    await interaction.reply({ content: 'That card is no longer available.', ephemeral: true }).catch(() => {});
+    return;
+  }
+
   if (verb === 'thoughts') {
     const modal = new ModalBuilder()
       .setCustomId(`${BLIPS_STREAM_MODAL_PREFIX}thoughts:${message.id}:${filename}`)
@@ -329,19 +359,34 @@ export async function handleBlipsStreamButton(interaction: ButtonInteraction): P
   await interaction.deferUpdate().catch(() => {});
 
   if (verb === 'archive') {
-    archiveBlip(path);
+    try {
+      archiveBlip(path);
+    } catch {
+      await interaction.followUp({ content: 'Could not archive that blip.', ephemeral: true }).catch(() => {});
+      return;
+    }
     await advanceCard(message, filename);
     return;
   }
 
   if (verb === 'next') {
-    touchBlip(path);
+    try {
+      touchBlip(path);
+    } catch {
+      await interaction.followUp({ content: 'Could not advance that blip.', ephemeral: true }).catch(() => {});
+      return;
+    }
     await advanceCard(message, filename);
     return;
   }
 
   if (verb === 'snooze') {
-    snoozeBlip(path, addDaysIso(7));
+    try {
+      snoozeBlip(path, addDaysIso(7));
+    } catch {
+      await interaction.followUp({ content: 'Could not snooze that blip.', ephemeral: true }).catch(() => {});
+      return;
+    }
     await advanceCard(message, filename);
     return;
   }
@@ -361,6 +406,14 @@ export async function handleBlipsStreamModal(interaction: ModalSubmitInteraction
 
   await interaction.deferUpdate().catch(() => {});
 
+  if (interaction.channelId) {
+    const current = readStreamState()[interaction.channelId]?.currentFilename;
+    if (current && filename && filename !== current) {
+      await interaction.followUp({ content: 'That card is no longer active.', ephemeral: true }).catch(() => {});
+      return;
+    }
+  }
+
   let streamMsg: Message | null = null;
   if (messageId && interaction.channelId) {
     const ch = await interaction.client.channels.fetch(interaction.channelId).catch(() => null);
@@ -370,13 +423,24 @@ export async function handleBlipsStreamModal(interaction: ModalSubmitInteraction
   }
 
   const path = blipPathFromFilename(filename);
+  if (!blipExists(filename)) {
+    await interaction.followUp({ content: 'That card is no longer available.', ephemeral: true }).catch(() => {});
+    return;
+  }
   if (!streamMsg && interaction.channelId) {
     streamMsg = await getStreamMessageForChannel(interaction.client as any, interaction.channelId);
   }
 
   if (verb === 'thoughts') {
     const thoughts = interaction.fields.getTextInputValue('thoughts').trim();
-    if (thoughts) appendToLog(path, `Thoughts: ${thoughts}`);
+    if (thoughts) {
+      try {
+        appendToLog(path, `Thoughts: ${thoughts}`);
+      } catch {
+        await interaction.followUp({ content: 'Could not save thoughts for that blip.', ephemeral: true }).catch(() => {});
+        return;
+      }
+    }
     if (streamMsg) {
       await advanceCard(streamMsg, filename);
     } else if (interaction.channelId) {

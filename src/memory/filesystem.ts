@@ -184,11 +184,16 @@ export function insert(path: string, lineNum: number, text: string): { success: 
   const content = readFileSync(fullPath, 'utf-8');
   const lines = content.split('\n');
 
-  if (lineNum < 0 || lineNum > lines.length) {
-    return { success: false, error: `Invalid line number: ${lineNum}. File has ${lines.length} lines.` };
+  // 1-based line numbers to match view() output.
+  if (lineNum < 1 || lineNum > lines.length + 1) {
+    return {
+      success: false,
+      error: `Invalid line number: ${lineNum}. File has ${lines.length} lines (valid insert range: 1-${lines.length + 1}).`,
+    };
   }
 
-  lines.splice(lineNum, 0, text);
+  const lineIndex = lineNum - 1;
+  lines.splice(lineIndex, 0, text);
   writeFileSync(fullPath, lines.join('\n'), 'utf-8');
   return { success: true };
 }

@@ -11,6 +11,7 @@ export interface AssistantStateConfig {
     blips?: string; // Unified channel for blips + captures
     blipsStream?: string;
     lobby?: string;
+    meta?: string; // Control-plane assistant channel
     trading?: string; // Trade logging, reflection, and idea curation
     meditationLogs?: string; // Voice logs appended to daily notes
     dailies?: string; // Daily voice notes appended to daily notes
@@ -138,6 +139,7 @@ export class StateStore {
       if (typeof rawChannels.blips === 'string') channels.blips = rawChannels.blips;
       if (typeof rawChannels.blipsStream === 'string') channels.blipsStream = rawChannels.blipsStream;
       if (typeof rawChannels.lobby === 'string') channels.lobby = rawChannels.lobby;
+      if (typeof rawChannels.meta === 'string') channels.meta = rawChannels.meta;
       if (typeof rawChannels.trading === 'string') channels.trading = rawChannels.trading;
       if (typeof rawChannels.meditationLogs === 'string') channels.meditationLogs = rawChannels.meditationLogs;
       if (typeof rawChannels.dailies === 'string') channels.dailies = rawChannels.dailies;

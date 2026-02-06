@@ -28,6 +28,7 @@ export class ProgressRenderer {
   private startTime: number;
   private stepCount = 0;
   private unknownSeq = 0;
+  private sawText = false;
 
   constructor(maxActions = 5) {
     this.maxActions = maxActions;
@@ -59,6 +60,7 @@ export class ProgressRenderer {
       this.actions = [];
       this.actionById.clear();
       this.stepCount = 0;
+      this.sawText = false;
       return true;
     }
 
@@ -120,6 +122,7 @@ export class ProgressRenderer {
     }
 
     if (event.type === 'text') {
+      this.sawText = true;
       return true;
     }
 
@@ -161,6 +164,8 @@ export class ProgressRenderer {
     // Header
     const stateLabel = label || (currentState === 'writing' ? 'writing' : 'working');
     const header = `${stateLabel} · ${engine} · ${elapsed}${step}`;
+    const trace = this.buildTrace(currentState);
+    const intent = this.currentIntent(currentState);
 
     // Action lines
     const actionLines: string[] = [];
@@ -192,11 +197,47 @@ export class ProgressRenderer {
     }
 
     if (actionLines.length === 0) {
-      return queueCount > 0 ? `${header}\n\nqueue: ${queueCount}` : header;
+      const compact = [header, trace, intent].filter(Boolean).join('\n');
+      return queueCount > 0 ? `${compact}\n\nqueue: ${queueCount}` : compact;
     }
 
-    const body = `${header}\n\n${actionLines.join('\n')}`;
+    const body = [header, trace, intent].filter(Boolean).join('\n') + `\n\n${actionLines.join('\n')}`;
     return queueCount > 0 ? `${body}\n\nqueue: ${queueCount}` : body;
+  }
+
+  private buildTrace(currentState: 'thinking' | 'tool' | 'writing'): string {
+    const phases = ['plan'];
+    const hasInspect = this.actions.some((a) => a.kind === 'tool' || a.kind === 'web_search');
+    const hasPatch = this.actions.some((a) => a.kind === 'file_change');
+    const hasValidate = this.actions.some((a) => {
+      if (a.kind !== 'command') return false;
+      return /(test|typecheck|build|lint|check|pytest|jest|vitest)/i.test(a.title);
+    });
+
+    if (hasInspect) phases.push('inspect');
+    if (hasPatch) phases.push('patch');
+    if (hasValidate) phases.push('validate');
+    if (currentState === 'writing' || this.sawText) phases.push('respond');
+    return `trace: ${phases.join(' -> ')}`;
+  }
+
+  private currentIntent(currentState: 'thinking' | 'tool' | 'writing'): string {
+    if (currentState === 'writing' || this.sawText) return 'why: composing response';
+
+    const running = [...this.actions].reverse().find((a) => a.status === 'running');
+    const active = running || this.actions[this.actions.length - 1];
+    if (!active) return 'why: planning next step';
+
+    if (active.kind === 'file_change') return 'why: applying requested changes';
+    if (active.kind === 'web_search') return 'why: gathering external context';
+    if (active.kind === 'tool') return 'why: inspecting current context';
+    if (active.kind === 'command') {
+      if (/(test|typecheck|build|lint|check|pytest|jest|vitest)/i.test(active.title)) {
+        return 'why: validating behavior';
+      }
+      return 'why: executing implementation step';
+    }
+    return 'why: making progress';
   }
 
   /**

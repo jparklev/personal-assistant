@@ -56,9 +56,11 @@ async function handleChannel(
     | 'blips'
     | 'blipsStream'
     | 'lobby'
+    | 'meta'
     | 'trading'
     | 'health'
     | 'ideas'
+    | 'flashcards'
     | 'meditationLogs'
     | 'dailies';
   const channel = interaction.options.getChannel('channel', true);
@@ -72,9 +74,11 @@ async function handleChannel(
     blips: 'Blips',
     blipsStream: 'Blips Stream',
     lobby: 'Lobby',
+    meta: 'Meta',
     trading: 'Trading',
     health: 'Health',
     ideas: 'Ideas',
+    flashcards: 'Flashcards',
     meditationLogs: 'Meditation Logs',
     dailies: 'Dailies',
   };
@@ -116,9 +120,11 @@ async function handleStatus(
     channels.blips ? `  Blips: <#${channels.blips}>` : '  Blips: not set',
     channels.blipsStream ? `  Blips Stream: <#${channels.blipsStream}>` : '  Blips Stream: not set',
     channels.lobby ? `  Lobby: <#${channels.lobby}>` : '  Lobby: not set',
+    channels.meta ? `  Meta: <#${channels.meta}>` : '  Meta: not set',
     channels.trading ? `  Trading: <#${channels.trading}>` : '  Trading: not set',
     channels.health ? `  Health: <#${channels.health}>` : '  Health: not set',
     channels.ideas ? `  Ideas: <#${channels.ideas}>` : '  Ideas: not set',
+    channels.flashcards ? `  Flashcards: <#${channels.flashcards}>` : '  Flashcards: not set',
     channels.meditationLogs
       ? `  Meditation: <#${channels.meditationLogs}>`
       : '  Meditation: not set',

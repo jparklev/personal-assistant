@@ -226,7 +226,7 @@ export async function* runClaude(
     timeoutMs?: number;
     cwd?: string;
     signal?: AbortSignal;
-    onEvent?: (event: RunnerEvent) => void;
+    onEvent?: (event: RunnerEvent) => void | Promise<void>;
   } = {}
 ): AsyncGenerator<RunnerEvent, RunResult> {
   // Acquire lock if resuming an existing session
@@ -255,11 +255,26 @@ export async function* runClaude(
       args.push('--resume', options.resumeId);
     }
 
-    const proc = spawn('claude', args, {
-      cwd: options.cwd || ASSISTANT_DIR,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      detached: process.platform !== 'win32',
-      env: stripAnthropicApiKeyEnv(),
+    let proc: ReturnType<typeof spawn>;
+    try {
+      proc = spawn('claude', args, {
+        cwd: options.cwd || ASSISTANT_DIR,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        detached: process.platform !== 'win32',
+        env: stripAnthropicApiKeyEnv(),
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Failed to start Claude CLI: ${msg}`);
+    }
+
+    let procErrorMessage = '';
+    const waitForProcessExit = new Promise<void>((resolve) => {
+      proc.once('close', () => resolve());
+      proc.once('error', (err) => {
+        procErrorMessage = err instanceof Error ? err.message : String(err);
+        resolve();
+      });
     });
 
     const timeoutMs = options.timeoutMs ?? 10 * 60 * 1000;
@@ -282,10 +297,27 @@ export async function* runClaude(
       else options.signal.addEventListener('abort', onAbort, { once: true });
     }
 
-    // Send prompt to stdin (safer than argv length limits)
-    proc.stdin.write(prompt);
-    proc.stdin.end();
+    const emitEvent = async (event: RunnerEvent): Promise<void> => {
+      if (!options.onEvent) return;
+      try {
+        await options.onEvent(event);
+      } catch (err) {
+        console.error('[Runner] onEvent handler failed:', err);
+      }
+    };
 
+    try {
+      // Send prompt to stdin (safer than argv length limits)
+      if (!proc.stdin) throw new Error('Claude stdin unavailable.');
+      proc.stdin.write(prompt);
+      proc.stdin.end();
+    } catch (err) {
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+
+    if (!proc.stdout) {
+      throw new Error('Claude stdout unavailable.');
+    }
     const rl = createInterface({ input: proc.stdout });
 
     let sessionId = '';
@@ -297,140 +329,141 @@ export async function* runClaude(
     const seenToolUseIds = new Set<string>();
     const pendingToolTitles = new Map<string, { toolName: string; title: string; kind: RunnerEvent['kind'] }>();
 
-    for await (const line of rl) {
-      if (!line.trim()) continue;
+    try {
+      for await (const line of rl) {
+        if (!line.trim()) continue;
 
-      let event: ClaudeEvent;
-      try {
-        event = JSON.parse(line);
-      } catch {
-        continue;
-      }
-
-      if (event.type === 'system' && (event as ClaudeInitEvent).subtype === 'init') {
-        const init = event as ClaudeInitEvent;
-        sessionId = init.session_id;
-
-        // For new sessions, acquire lock now that we know the session ID
-        if (!options.resumeId) {
-          await acquireSessionLock(sessionId);
-          acquiredSessionId = sessionId;
-        }
-
-        const startedEvent: RunnerEvent = {
-          type: 'started',
-          sessionId,
-        };
-        options.onEvent?.(startedEvent);
-        yield startedEvent;
-      } else if (event.type === 'assistant') {
-        const assistant = event as ClaudeAssistantEvent;
-        for (const content of assistant.message.content) {
-          if (content.type === 'text' && content.text) {
-            const textEvent: RunnerEvent = {
-              type: 'text',
-              sessionId,
-              content: content.text,
-            };
-            options.onEvent?.(textEvent);
-            yield textEvent;
-          } else if (content.type === 'tool_use') {
-            if (!content.id) continue;
-
-            if (!seenToolUseIds.has(content.id)) {
-              seenToolUseIds.add(content.id);
-              if (content.name && !toolsUsed.includes(content.name)) toolsUsed.push(content.name);
-            }
-
-            const { kind, title } = toolDisplayFromUse(content.name, content.input);
-            pendingToolTitles.set(content.id, { toolName: content.name, title, kind });
-
-            const toolEvent: RunnerEvent = {
-              type: 'tool_start',
-              sessionId,
-              toolId: content.id,
-              toolName: content.name,
-              title,
-              kind,
-            };
-            options.onEvent?.(toolEvent);
-            yield toolEvent;
-          }
-        }
-      } else if (event.type === 'user') {
-        const user = event as ClaudeUserEvent;
-
-        // Older format: no tool_use_id available; treat as a generic tool end.
-        if (typeof user.tool_use_result === 'string' && user.tool_use_result) {
-          const toolEndEvent: RunnerEvent = {
-            type: 'tool_end',
-            sessionId,
-            content: user.tool_use_result,
-          };
-          options.onEvent?.(toolEndEvent);
-          yield toolEndEvent;
+        let event: ClaudeEvent;
+        try {
+          event = JSON.parse(line);
+        } catch {
           continue;
         }
 
-        const blocks = user.message?.content;
-        if (!Array.isArray(blocks)) continue;
+        if (event.type === 'system' && (event as ClaudeInitEvent).subtype === 'init') {
+          const init = event as ClaudeInitEvent;
+          sessionId = init.session_id;
 
-        for (const block of blocks) {
-          if (!block || typeof block !== 'object') continue;
-          if ((block as any).type !== 'tool_result') continue;
+          // For new sessions, acquire lock now that we know the session ID
+          if (!options.resumeId) {
+            await acquireSessionLock(sessionId);
+            acquiredSessionId = sessionId;
+          }
 
-          const toolUseId = (block as any).tool_use_id;
-          if (typeof toolUseId !== 'string' || !toolUseId) continue;
-
-          const isError = (block as any).is_error === true;
-          const resultText = summarizeToolResultText((block as any).content);
-          const pending = pendingToolTitles.get(toolUseId);
-
-          const toolEndEvent: RunnerEvent = {
-            type: 'tool_end',
+          const startedEvent: RunnerEvent = {
+            type: 'started',
             sessionId,
-            toolId: toolUseId,
-            toolName: pending?.toolName,
-            title: pending?.title,
-            kind: pending?.kind,
-            ok: !isError,
-            content: resultText,
           };
-          options.onEvent?.(toolEndEvent);
-          yield toolEndEvent;
+          await emitEvent(startedEvent);
+          yield startedEvent;
+        } else if (event.type === 'assistant') {
+          const assistant = event as ClaudeAssistantEvent;
+          for (const content of assistant.message.content) {
+            if (content.type === 'text' && content.text) {
+              const textEvent: RunnerEvent = {
+                type: 'text',
+                sessionId,
+                content: content.text,
+              };
+              await emitEvent(textEvent);
+              yield textEvent;
+            } else if (content.type === 'tool_use') {
+              if (!content.id) continue;
+
+              if (!seenToolUseIds.has(content.id)) {
+                seenToolUseIds.add(content.id);
+                if (content.name && !toolsUsed.includes(content.name)) toolsUsed.push(content.name);
+              }
+
+              const { kind, title } = toolDisplayFromUse(content.name, content.input);
+              pendingToolTitles.set(content.id, { toolName: content.name, title, kind });
+
+              const toolEvent: RunnerEvent = {
+                type: 'tool_start',
+                sessionId,
+                toolId: content.id,
+                toolName: content.name,
+                title,
+                kind,
+              };
+              await emitEvent(toolEvent);
+              yield toolEvent;
+            }
+          }
+        } else if (event.type === 'user') {
+          const user = event as ClaudeUserEvent;
+
+          // Older format: no tool_use_id available; treat as a generic tool end.
+          if (typeof user.tool_use_result === 'string' && user.tool_use_result) {
+            const toolEndEvent: RunnerEvent = {
+              type: 'tool_end',
+              sessionId,
+              content: user.tool_use_result,
+            };
+            await emitEvent(toolEndEvent);
+            yield toolEndEvent;
+            continue;
+          }
+
+          const blocks = user.message?.content;
+          if (!Array.isArray(blocks)) continue;
+
+          for (const block of blocks) {
+            if (!block || typeof block !== 'object') continue;
+            if ((block as any).type !== 'tool_result') continue;
+
+            const toolUseId = (block as any).tool_use_id;
+            if (typeof toolUseId !== 'string' || !toolUseId) continue;
+
+            const isError = (block as any).is_error === true;
+            const resultText = summarizeToolResultText((block as any).content);
+            const pending = pendingToolTitles.get(toolUseId);
+
+            const toolEndEvent: RunnerEvent = {
+              type: 'tool_end',
+              sessionId,
+              toolId: toolUseId,
+              toolName: pending?.toolName,
+              title: pending?.title,
+              kind: pending?.kind,
+              ok: !isError,
+              content: resultText,
+            };
+            await emitEvent(toolEndEvent);
+            yield toolEndEvent;
+          }
+        } else if (event.type === 'result') {
+          const result = event as ClaudeResultEvent;
+          finalResult = result.result;
+          durationMs = result.duration_ms;
+          ok = !result.is_error;
+          sawResult = true;
+          const completedEvent: RunnerEvent = {
+            type: 'completed',
+            sessionId: result.session_id,
+            content: result.result,
+            ok,
+            durationMs,
+          };
+          await emitEvent(completedEvent);
+          yield completedEvent;
         }
-      } else if (event.type === 'result') {
-        const result = event as ClaudeResultEvent;
-        finalResult = result.result;
-        durationMs = result.duration_ms;
-        ok = !result.is_error;
-        sawResult = true;
-        const completedEvent: RunnerEvent = {
-          type: 'completed',
-          sessionId: result.session_id,
-          content: result.result,
-          ok,
-          durationMs,
-        };
-        options.onEvent?.(completedEvent);
-        yield completedEvent;
       }
-    }
 
-    // Wait for process to exit
-    await new Promise<void>((resolve) => {
-      proc.on('close', () => resolve());
-    });
-
-    if (options.signal) {
-      options.signal.removeEventListener('abort', onAbort);
+      // Wait for process to exit
+      await waitForProcessExit;
+    } finally {
+      if (options.signal) {
+        options.signal.removeEventListener('abort', onAbort);
+      }
+      clearTimeout(timeout);
     }
-    clearTimeout(timeout);
 
     if (!sawResult) {
       ok = false;
       if (didAbort) finalResult = 'Cancelled.';
       else if (didTimeout) finalResult = 'Timeout exceeded.';
+      else if (procErrorMessage) finalResult = procErrorMessage;
       else finalResult = finalResult || 'Claude exited without a result.';
     }
 
@@ -460,7 +493,7 @@ export async function invokeClaude(
     timeoutMs?: number;
     cwd?: string;
     signal?: AbortSignal;
-    onEvent?: (event: RunnerEvent) => void;
+    onEvent?: (event: RunnerEvent) => void | Promise<void>;
   } = {}
 ): Promise<RunResult> {
   const generator = runClaude(prompt, options);

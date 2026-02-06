@@ -5,7 +5,7 @@
  * Falls back gracefully: commits locally even if push fails.
  */
 
-import { execSync, spawn } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { createInterface } from 'readline';
 
 const GIT_TIMEOUT_MS = 30_000;
@@ -20,9 +20,9 @@ interface SyncResult {
 /**
  * Execute git command with timeout.
  */
-function git(cmd: string, cwd: string): { ok: boolean; output: string } {
+function git(args: string[], cwd: string): { ok: boolean; output: string } {
   try {
-    const output = execSync(`git ${cmd}`, {
+    const output = execFileSync('git', args, {
       cwd,
       timeout: GIT_TIMEOUT_MS,
       stdio: 'pipe',
@@ -30,7 +30,10 @@ function git(cmd: string, cwd: string): { ok: boolean; output: string } {
     });
     return { ok: true, output: output || '' };
   } catch (err: any) {
-    return { ok: false, output: err.message || String(err) };
+    const stdout = typeof err?.stdout === 'string' ? err.stdout : '';
+    const stderr = typeof err?.stderr === 'string' ? err.stderr : '';
+    const message = err?.message || String(err);
+    return { ok: false, output: `${stdout}${stderr}${message}`.trim() };
   }
 }
 
@@ -38,7 +41,7 @@ function git(cmd: string, cwd: string): { ok: boolean; output: string } {
  * Check if there are unmerged (conflicted) files.
  */
 function hasConflicts(cwd: string): boolean {
-  const { output } = git('diff --name-only --diff-filter=U', cwd);
+  const { output } = git(['diff', '--name-only', '--diff-filter=U'], cwd);
   return output.trim().length > 0;
 }
 
@@ -46,7 +49,7 @@ function hasConflicts(cwd: string): boolean {
  * Check if a merge is in progress.
  */
 function isMerging(cwd: string): boolean {
-  const { ok } = git('rev-parse --verify MERGE_HEAD', cwd);
+  const { ok } = git(['rev-parse', '--verify', 'MERGE_HEAD'], cwd);
   return ok;
 }
 
@@ -150,19 +153,19 @@ export async function syncVaultChanges(
 
   // 1. Stage and commit local changes FIRST
   // This is critical: git pull will fail with "local changes would be overwritten" if we don't commit first
-  const addResult = git('add -A', vaultPath);
+  const addResult = git(['add', '-A'], vaultPath);
   if (!addResult.ok) {
     console.error(`${tag} git add failed:`, addResult.output);
     return { ok: false, pushed: false, message: 'git add failed' };
   }
 
   // Check if there's anything to commit
-  const statusResult = git('diff --cached --quiet', vaultPath);
+  const statusResult = git(['diff', '--cached', '--quiet'], vaultPath);
   const hasChanges = !statusResult.ok; // exit code 1 means there are changes
 
   // Commit local changes before pulling
   if (hasChanges) {
-    const commitResult = git(`commit -m "${commitMessage}"`, vaultPath);
+    const commitResult = git(['commit', '-m', commitMessage], vaultPath);
     if (!commitResult.ok && !commitResult.output.includes('nothing to commit')) {
       console.error(`${tag} Initial commit failed:`, commitResult.output);
       return { ok: false, pushed: false, message: 'commit failed' };
@@ -171,7 +174,7 @@ export async function syncVaultChanges(
   }
 
   // 2. Pull to integrate remote changes (prefer merge over rebase for simpler conflict resolution)
-  const pullResult = git('pull --no-rebase --no-edit', vaultPath);
+  const pullResult = git(['pull', '--no-rebase', '--no-edit'], vaultPath);
 
   if (!pullResult.ok) {
     console.log(`${tag} Pull had issues, checking for conflicts...`);
@@ -186,7 +189,7 @@ export async function syncVaultChanges(
         console.error(`${tag} Claude could not resolve conflicts`);
         // Local changes are already committed, so they're safe
         // Abort the merge to get back to a clean state
-        git('merge --abort', vaultPath);
+        git(['merge', '--abort'], vaultPath);
         return { ok: true, pushed: false, message: 'committed locally, conflicts unresolved' };
       }
 
@@ -200,7 +203,7 @@ export async function syncVaultChanges(
   }
 
   // 3. Push
-  const pushResult = git('push', vaultPath);
+  const pushResult = git(['push'], vaultPath);
 
   if (!pushResult.ok) {
     console.error(`${tag} Push failed:`, pushResult.output);

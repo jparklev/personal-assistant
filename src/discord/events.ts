@@ -7,7 +7,7 @@
  */
 
 import type { Client, ChatInputCommandInteraction, Message } from 'discord.js';
-import { ChannelType, Events } from 'discord.js';
+import { ChannelType, Events, PermissionFlagsBits } from 'discord.js';
 import type { DiscordTransport } from './transport';
 import type { AppConfig } from '../config';
 import type { StateStore } from '../state';
@@ -18,6 +18,11 @@ import { requestVaultSync } from '../vault/sync-queue';
 import { invokeClaude, type RunnerEvent } from '../assistant/runner';
 import { storeSession, getSession, setSessionMetadata, getSessionMetadata } from '../assistant/sessions';
 import { ProgressRenderer } from '../assistant/progress';
+import {
+  formatMetaAutomationSummary,
+  listDirtyFiles,
+  runMetaAutomation,
+} from '../meta/automation';
 import {
   ensureBlipsStreamCard,
   handleBlipsStreamButton,
@@ -48,14 +53,12 @@ export interface AppContext {
 type QueuedAssistantMessage = {
   message: Message;
   text: string;
-  channelType: 'general' | 'morning-checkin' | 'blips' | 'lobby' | 'health' | 'ideas';
+  channelType: 'general' | 'morning-checkin' | 'blips' | 'lobby' | 'meta' | 'health' | 'ideas';
 };
 
 type RunningAssistantTask = {
   progressMessageId: string;
   sessionId: string | null;
-  resumeReady: Promise<string>;
-  resolveResumeReady: (sessionId: string) => void;
   abortController: AbortController;
   cancelled: boolean;
   preSessionQueue: QueuedAssistantMessage[];
@@ -141,6 +144,12 @@ function ensureQueue(sessionId: string): QueuedAssistantMessage[] {
 function truncateForPrompt(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text;
   return text.slice(0, maxLen - 1) + '…';
+}
+
+function canUseMetaChannel(message: Message): boolean {
+  if (!message.guild) return false;
+  if (message.author.id === message.guild.ownerId) return true;
+  return message.member?.permissions.has(PermissionFlagsBits.Administrator) === true;
 }
 
 // ============== Event Registration ==============
@@ -248,7 +257,8 @@ export function registerEventHandlers(client: Client, ctx: AppContext) {
     // Priority 4: Core assistant channels (morning checkin, health)
     const isAssistantChannel =
       message.channelId === assistantChannels.morningCheckin ||
-      message.channelId === assistantChannels.health;
+      message.channelId === assistantChannels.health ||
+      message.channelId === assistantChannels.meta;
     const isManagedChannel = managed.includes(message.channelId);
 
     if (isAssistantChannel || isManagedChannel) {
@@ -335,6 +345,9 @@ async function handleHelp(interaction: ChatInputCommandInteraction) {
     '• `/assistant channel` - Set channels',
     '• `/assistant category` - Set category for created channels',
     '• `/assistant status` - Show configuration',
+    '',
+    '**Meta Channel**',
+    '• Set a Meta channel via `/assistant channel type: Meta` for control-plane tasks',
   ].join('\n');
 
   await interaction.reply(help);
@@ -472,8 +485,14 @@ async function handleAssistantMessage(message: Message, ctx: AppContext): Promis
   if (message.channelId === assistantChannels.morningCheckin) channelType = 'morning-checkin';
   else if (message.channelId === assistantChannels.blips) channelType = 'blips';
   else if (message.channelId === assistantChannels.lobby) channelType = 'lobby';
+  else if (message.channelId === assistantChannels.meta) channelType = 'meta';
   else if (message.channelId === assistantChannels.health) channelType = 'health';
   else if (message.channelId === assistantChannels.ideas) channelType = 'ideas';
+
+  if (channelType === 'meta' && !canUseMetaChannel(message)) {
+    await message.reply('Meta channel access is restricted to server admins.');
+    return;
+  }
 
   // Record user response for health check-in tracking.
   // (Any activity in #health counts as "not ignored".)
@@ -486,6 +505,7 @@ async function handleAssistantMessage(message: Message, ctx: AppContext): Promis
     message.channelId === assistantChannels.morningCheckin ||
     message.channelId === assistantChannels.blips ||
     message.channelId === assistantChannels.lobby ||
+    message.channelId === assistantChannels.meta ||
     message.channelId === assistantChannels.health ||
     message.channelId === assistantChannels.ideas;
 
@@ -570,7 +590,7 @@ async function runAssistantTurn(
   const metadata = resumeId ? getSessionMetadata(resumeId) : undefined;
   const model = metadata?.model || 'opus';
 
-  const channelMemory = readChannelMemory(ctx.cfg, message.channelId);
+  const channelMemory = channelType === 'meta' ? '' : readChannelMemory(ctx.cfg, message.channelId);
   const channelContext = channelMemory
     ? `## Channel Memory\n\n${truncateForPrompt(channelMemory, 3000)}\n\n`
     : '';
@@ -626,16 +646,9 @@ async function runAssistantTurn(
   const progressMsg = await message.reply(wrapProgress(initialProgress));
   const progressEditor = createThrottledEditor(progressMsg, wrapProgress(initialProgress));
 
-  let resolveResumeReady: (sessionId: string) => void;
-  const resumeReady = new Promise<string>((resolve) => {
-    resolveResumeReady = resolve;
-  });
-
   const task: RunningAssistantTask = {
     progressMessageId: progressMsg.id,
     sessionId: resumeId,
-    resumeReady,
-    resolveResumeReady: resolveResumeReady!,
     abortController: new AbortController(),
     cancelled: false,
     preSessionQueue: [],
@@ -651,7 +664,6 @@ async function runAssistantTurn(
   runningByProgressMessageId.set(progressMsg.id, task);
   if (resumeId) {
     runningBySessionId.set(resumeId, task);
-    task.resolveResumeReady(resumeId);
     storeSession(progressMsg.id, resumeId);
   }
 
@@ -659,6 +671,8 @@ async function runAssistantTurn(
 
   const at = message.createdAt || new Date();
   const assistantDate = isoDateForAssistant(at);
+  const repoCwd = process.cwd();
+  const metaBaselineDirty = channelType === 'meta' ? listDirtyFiles(repoCwd) : [];
   const timeStr = formatTimeInTimeZone(at, DEFAULT_TIME_ZONE);
   const timeContext = `## Time Context\n\n- User timezone: ${DEFAULT_TIME_ZONE} (Pacific)\n- Message time: ${timeStr} PT\n- Effective date for notes/files: ${assistantDate} (00:00–04:59 PT counts as previous day)\n\n`;
   const vaultVoice =
@@ -708,9 +722,51 @@ ${vaultVoice}`;
 Josh wants honest engagement, not validation.
 
 ${vaultVoice}`;
+    } else if (channelType === 'meta') {
+      prompt = `${timeContext}## User Request\n\n${text}
+
+You are running in Josh's #meta control-plane channel for this assistant codebase.
+
+Operational rules:
+- Treat this as an open-ended operator request. Decide the best approach; no fixed command grammar.
+- Use tools autonomously (Read/Edit/Write/Bash/Web/etc.) to complete the request.
+- You may use infrastructure CLIs (for example doctl/ssh) when needed.
+- Keep progress grounded in observable actions and avoid speculative claims.
+- IMPORTANT: If repository changes are made, the host will run validation + commit/push automatically after your run.
+- Do NOT run git add/commit/push yourself unless Josh explicitly asks you to override that behavior.
+
+Validation gate enforced by host on changed files:
+1) bun test tests
+2) bun run typecheck
+3) bun run build
+
+Deliverable:
+- Provide a concise summary of what you changed and why.
+- Call out anything that still needs manual follow-up.`;
     } else {
       prompt = `${channelContext}${timeContext}## Current User Message\n\n${text}\n\n${vaultVoice}`;
     }
+  } else if (channelType === 'meta') {
+    prompt = `You are Josh's #meta control-plane assistant for this repository.
+
+${buildAssistantContext()}
+
+${conversationContext}${timeContext}## User Request
+
+${text}
+
+Operating mode:
+- Free-form operations: choose the best sequence of steps to satisfy the request.
+- Use tools directly; inspect code, run commands, and perform changes when warranted.
+- You may use infrastructure CLIs (for example doctl/ssh) when needed.
+- Be explicit about risks before high-impact operations.
+- IMPORTANT: The host automatically runs validation and auto commit/push if repository changes are detected.
+- Do NOT run git add/commit/push unless Josh explicitly asks to bypass host automation.
+
+Respond directly with:
+1) what you did
+2) why you chose that approach
+3) any unresolved risks or next steps.`;
   } else if (channelType === 'health') {
     // Health channel gets full health context and vault access
     const healthContext = buildHealthContext(ctx.cfg.vaultPath, { now: at });
@@ -906,7 +962,6 @@ Output ONLY your response message, nothing else.`;
             finalSessionId = event.sessionId;
             runningBySessionId.set(event.sessionId, task);
             storeSession(progressMsg.id, event.sessionId);
-            task.resolveResumeReady(event.sessionId);
 
             for (const queued of task.preSessionQueue) {
               await enqueueSessionMessage(queued, event.sessionId);
@@ -931,19 +986,30 @@ Output ONLY your response message, nothing else.`;
 
     if (result.text && result.ok) {
       progressEditor.close();
+      let finalText = result.text;
+
+      if (channelType === 'meta') {
+        const automation = runMetaAutomation({
+          cwd: repoCwd,
+          baselineDirtyFiles: metaBaselineDirty,
+          commitMessage: `meta: ${assistantDate}`,
+        });
+        finalText += `\n\n${formatMetaAutomationSummary(automation)}`;
+      }
+
       const toolsSummary =
         result.toolsUsed.length > 0
           ? `\n\n_${result.toolsUsed.join(', ')} · ${(result.durationMs / 1000).toFixed(1)}s_`
           : `\n\n_${(result.durationMs / 1000).toFixed(1)}s_`;
 
       const maxLen = 2000 - toolsSummary.length;
-      const responseText = result.text.slice(0, maxLen) + toolsSummary;
+      const responseText = finalText.slice(0, maxLen) + toolsSummary;
 
       await progressMsg.edit(responseText);
       storeSession(progressMsg.id, result.sessionId);
 
-      if (result.text.length > maxLen) {
-        let remaining = result.text.slice(maxLen);
+      if (finalText.length > maxLen) {
+        let remaining = finalText.slice(maxLen);
         while (remaining.length > 0) {
           const chunk = remaining.slice(0, 1900);
           const followUp = await message.reply(chunk);
@@ -954,7 +1020,7 @@ Output ONLY your response message, nothing else.`;
 
       // Sync vault if file-modifying tools were used (especially for health channel)
       const fileTools = ['Edit', 'Write', 'NotebookEdit', 'MultiEdit'];
-      if (result.toolsUsed.some((t) => fileTools.includes(t))) {
+      if (channelType !== 'meta' && result.toolsUsed.some((t) => fileTools.includes(t))) {
         const commitMsg = channelType === 'health' ? `health: ${assistantDate}` : `assistant: ${assistantDate}`;
         requestVaultSync(ctx.cfg.vaultPath, commitMsg);
       }
@@ -979,6 +1045,23 @@ Output ONLY your response message, nothing else.`;
     runningByProgressMessageId.delete(progressMsg.id);
 
     const sid = finalSessionId || task.sessionId;
+
+    // If the run ended before "started", don't silently drop replies.
+    const preSessionQueued = task.preSessionQueue.splice(0);
+    if (preSessionQueued.length > 0) {
+      if (sid) {
+        for (const queued of preSessionQueued) {
+          await enqueueSessionMessage(queued, sid);
+        }
+      } else {
+        for (const queued of preSessionQueued) {
+          await queued.message
+            .reply('The previous run ended before session startup, so this reply was not queued. Please resend.')
+            .catch(() => {});
+        }
+      }
+    }
+
     if (sid && runningBySessionId.get(sid) === task) {
       runningBySessionId.delete(sid);
       await maybeStartSessionWorker(sid, ctx);

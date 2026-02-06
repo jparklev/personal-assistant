@@ -30,6 +30,19 @@ export interface SchedulerContext {
   scheduler: SchedulerState;
 }
 
+export function buildTaskDateContext(now: Date, timeZone: string) {
+  const tz = timeZone || DEFAULT_TIME_ZONE;
+  const todayIso = isoDateForAssistant(now, tz);
+  const yesterdayIso = addDaysIsoDate(todayIso, -1);
+  const dateStr = now.toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    timeZone: tz,
+  });
+  return { timeZone: tz, todayIso, yesterdayIso, dateStr };
+}
+
 /**
  * Start the background scheduler loop.
  * Call this after the Discord client is ready.
@@ -72,7 +85,7 @@ async function runSchedulerTick(ctx: SchedulerContext): Promise<void> {
   if (scheduler.isDailyTaskDue('morningCheckin')) {
     console.log('[Scheduler] Morning check-in is due');
     try {
-      const didSend = await runMorningCheckin(ctx);
+      const didSend = await runMorningCheckinTask(ctx);
       if (didSend) {
         scheduler.markRun('morningCheckin');
         console.log('[Scheduler] Morning check-in completed');
@@ -108,7 +121,7 @@ async function runSchedulerTick(ctx: SchedulerContext): Promise<void> {
   if (scheduler.isDailyTaskDue('eveningCheckin')) {
     console.log('[Scheduler] Evening check-in is due');
     try {
-      const didSend = await runEveningCheckin(ctx);
+      const didSend = await runEveningCheckinTask(ctx);
       if (didSend) {
         scheduler.markRun('eveningCheckin');
         console.log('[Scheduler] Evening check-in completed');
@@ -124,7 +137,7 @@ async function runSchedulerTick(ctx: SchedulerContext): Promise<void> {
   if (scheduler.isWeeklyTaskDue()) {
     console.log('[Scheduler] Weekly reconsolidation is due');
     try {
-      const didSend = await runWeeklyReconsolidation(ctx);
+      const didSend = await runWeeklyReconsolidationTask(ctx);
       if (didSend) {
         scheduler.markRun('weeklyReconsolidation');
         console.log('[Scheduler] Weekly reconsolidation completed');
@@ -140,7 +153,7 @@ async function runSchedulerTick(ctx: SchedulerContext): Promise<void> {
 /**
  * Morning check-in task.
  */
-async function runMorningCheckin(ctx: SchedulerContext): Promise<boolean> {
+export async function runMorningCheckinTask(ctx: SchedulerContext): Promise<boolean> {
   const channelId = ctx.state.snapshot.assistant.channels.morningCheckin;
   if (!channelId) {
     console.log('[Scheduler] Morning check-in channel not configured');
@@ -157,25 +170,20 @@ async function runMorningCheckin(ctx: SchedulerContext): Promise<boolean> {
   const dueQuestions = getDueQuestions();
   const reminders = getTodayReminders();
 
-  // Use Pacific timezone with 5am rollover for "today" and "yesterday"
-  const todayIso = isoDateForAssistant();
-  const yesterdayIso = addDaysIsoDate(todayIso, -1);
-  const dateStr = new Date().toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    timeZone: DEFAULT_TIME_ZONE,
-  });
+  const timeCtx = buildTaskDateContext(
+    new Date(),
+    ctx.scheduler.snapshot.morningCheckin.timezone || DEFAULT_TIME_ZONE
+  );
 
   const prompt = `You are the personal assistant. Generate a morning check-in message for Discord.
 
-Today is ${dateStr}.
+Today is ${timeCtx.dateStr} (${timeCtx.timeZone}).
 
 ${buildAssistantContext()}
 
 ## Sources to Synthesize
 
-1. **Yesterday's daily note** (${yesterdayIso}.md)
+1. **Yesterday's daily note** (${timeCtx.yesterdayIso}.md)
    - Read it from the vault at ${ctx.cfg.vaultPath}/Daily/
    - Look for incomplete checkbox items (- [ ])
    - Look for #followups tags
@@ -200,7 +208,7 @@ ${buildAssistantContext()}
 
   Output ONLY the message to send, nothing else.`;
 
-  const fallback = `**Good morning!** Here's your check-in for ${dateStr}.\n\nWhat's your main focus for today?`;
+  const fallback = `**Good morning!** Here's your check-in for ${timeCtx.dateStr}.\n\nWhat's your main focus for today?`;
   let message = fallback;
 
   try {
@@ -228,7 +236,7 @@ ${buildAssistantContext()}
 /**
  * Evening check-in task.
  */
-async function runEveningCheckin(ctx: SchedulerContext): Promise<boolean> {
+export async function runEveningCheckinTask(ctx: SchedulerContext): Promise<boolean> {
   const channelId = ctx.state.snapshot.assistant.channels.morningCheckin; // Use same channel
   if (!channelId) {
     console.log('[Scheduler] Evening check-in channel not configured');
@@ -241,24 +249,20 @@ async function runEveningCheckin(ctx: SchedulerContext): Promise<boolean> {
     return false;
   }
 
-  // Use Pacific timezone with 5am rollover for "today"
-  const todayIso = isoDateForAssistant();
-  const dateStr = new Date().toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    timeZone: DEFAULT_TIME_ZONE,
-  });
+  const timeCtx = buildTaskDateContext(
+    new Date(),
+    ctx.scheduler.snapshot.eveningCheckin.timezone || DEFAULT_TIME_ZONE
+  );
 
   const prompt = `You are the personal assistant. Generate an evening check-in message for Discord.
 
-Today is ${dateStr}.
+Today is ${timeCtx.dateStr} (${timeCtx.timeZone}).
 
 ${buildAssistantContext()}
 
 ## Your Task
 
-Read today's daily note from the vault at ${ctx.cfg.vaultPath}/Daily/${todayIso}.md
+Read today's daily note from the vault at ${ctx.cfg.vaultPath}/Daily/${timeCtx.todayIso}.md
 
 Look for:
 - What was accomplished today
@@ -298,7 +302,7 @@ Be brief. This is a wind-down, not a debrief. No emojis.
 /**
  * Weekly reconsolidation task.
  */
-async function runWeeklyReconsolidation(ctx: SchedulerContext): Promise<boolean> {
+export async function runWeeklyReconsolidationTask(ctx: SchedulerContext): Promise<boolean> {
   const channelId = ctx.state.snapshot.assistant.channels.morningCheckin;
   if (!channelId) {
     console.log('[Scheduler] Weekly reconsolidation channel not configured');
@@ -311,9 +315,11 @@ async function runWeeklyReconsolidation(ctx: SchedulerContext): Promise<boolean>
     return false;
   }
 
-  // Use Pacific timezone with 5am rollover for date calculations
-  const todayIso = isoDateForAssistant();
-  const weekAgoIso = addDaysIsoDate(todayIso, -7);
+  const timeCtx = buildTaskDateContext(
+    new Date(),
+    ctx.scheduler.snapshot.weeklyReconsolidation.timezone || DEFAULT_TIME_ZONE
+  );
+  const weekAgoIso = addDaysIsoDate(timeCtx.todayIso, -7);
 
   const prompt = `You are the personal assistant. Generate a weekly reconsolidation message for Discord.
 
@@ -322,7 +328,7 @@ ${buildAssistantContext()}
 ## Your Task
 
 1. Read the daily notes from the past week in ${ctx.cfg.vaultPath}/Daily/
-   - Dates: ${weekAgoIso} through ${todayIso}
+   - Dates: ${weekAgoIso} through ${timeCtx.todayIso}
 
 2. Read the Goals 2026 note if it exists
 
@@ -372,7 +378,7 @@ This is a gentle weekly reflection, not a performance review. Be direct but kind
  */
 type HealthCheckinResult = { ok: boolean; sent: boolean; message: string };
 
-async function runHealthCheckinTask(ctx: SchedulerContext): Promise<HealthCheckinResult> {
+export async function runHealthCheckinTask(ctx: SchedulerContext): Promise<HealthCheckinResult> {
 
   const channelId = ctx.state.snapshot.assistant.channels.health;
   if (!channelId) {

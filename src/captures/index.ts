@@ -55,6 +55,13 @@ function safeFilename(title: string): string {
     .slice(0, 60);
 }
 
+function escapeYamlString(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/\r?\n/g, ' ')
+    .replace(/"/g, '\\"');
+}
+
 // Podcast platform patterns
 const PODCAST_PATTERNS = [
   'podcasts.apple.com',
@@ -103,22 +110,22 @@ export function detectContentType(url: string): CaptureMetadata['type'] {
 export function generateFrontmatter(meta: CaptureMetadata): string {
   const lines = [
     '---',
-    `title: "${meta.title.replace(/"/g, '\\"')}"`,
-    `url: "${meta.url}"`,
+    `title: "${escapeYamlString(meta.title)}"`,
+    `url: "${escapeYamlString(meta.url)}"`,
     `type: ${meta.type}`,
     `captured: ${meta.capturedAt}`,
   ];
 
   if (meta.author) {
-    lines.push(`author: "${meta.author.replace(/"/g, '\\"').slice(0, 200)}"`);
+    lines.push(`author: "${escapeYamlString(meta.author).slice(0, 200)}"`);
   }
 
   if (meta.tags && meta.tags.length > 0) {
-    lines.push(`tags: [${meta.tags.map((t) => `"${t}"`).join(', ')}]`);
+    lines.push(`tags: [${meta.tags.map((t) => `"${escapeYamlString(t)}"`).join(', ')}]`);
   }
 
   if (meta.description) {
-    lines.push(`description: "${meta.description.replace(/"/g, '\\"').slice(0, 200)}"`);
+    lines.push(`description: "${escapeYamlString(meta.description).slice(0, 200)}"`);
   }
 
   lines.push('---', '');
@@ -137,12 +144,14 @@ export function saveCapture(
 
   const capturesDir = getCapturesDir();
   const date = isoDateForAssistant(opts?.now || new Date());
-  const filename = `${date}-${safeFilename(meta.title)}.md`;
-  const filePath = join(capturesDir, filename);
-
-  // Check for duplicate
-  if (existsSync(filePath)) {
-    return { success: false, error: `File already exists: ${filename}` };
+  const base = `${date}-${safeFilename(meta.title)}`;
+  let filename = `${base}.md`;
+  let filePath = join(capturesDir, filename);
+  let counter = 2;
+  while (existsSync(filePath)) {
+    filename = `${base}-${counter}.md`;
+    filePath = join(capturesDir, filename);
+    counter++;
   }
 
   const frontmatter = generateFrontmatter(meta);
