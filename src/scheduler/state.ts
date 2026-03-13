@@ -32,22 +32,22 @@ export function defaultScheduleState(): ScheduleState {
   return {
     version: 1,
     morningCheckin: {
-      enabled: true,
+      enabled: false,
       time: '08:00',
       timezone: 'America/Los_Angeles',
     },
     eveningCheckin: {
-      enabled: true,
+      enabled: false,
       time: '21:00',
       timezone: 'America/Los_Angeles',
     },
     healthCheckin: {
-      enabled: true,
+      enabled: false,
       time: '20:00', // 8 PM - before evening checkin
       timezone: 'America/Los_Angeles',
     },
     weeklyReconsolidation: {
-      enabled: true,
+      enabled: false,
       dayOfWeek: 0, // Sunday
       time: '10:00',
       timezone: 'America/Los_Angeles',
